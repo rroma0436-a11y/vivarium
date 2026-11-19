@@ -32,11 +32,12 @@ jobs:
           mv tpl/templates/* ~/.local/share/godot/export_templates/${V}.stable/
           rm -f Godot_v${V}-stable_export_templates.tpz
 
-      - name: Розпакувати файли гри
+      - name: Розпакувати файли гри (усі zip-архіви)
         run: |
-          if [ -f game_files.zip ]; then unzip -q -o game_files.zip -d . ; fi
-          if [ -f assets_puppy.zip ]; then unzip -q -o assets_puppy.zip -d . ; fi
-          ls -R scenes scripts assets | head -40
+          for z in assets_puppy.zip game_files.zip models_*.zip; do
+            if [ -f "$z" ]; then echo "розпаковую $z"; unzip -q -o "$z" -d . ; fi
+          done
+          ls -R scenes scripts assets | head -60
 
       - name: Ключ для підпису
         run: |
