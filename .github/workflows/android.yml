@@ -65,11 +65,34 @@ jobs:
       - name: Імпорт ресурсів
         run: ./godot --headless --path . --import || ./godot --headless --path . --editor --quit-after 300
 
+      - name: Твій ключ підпису (із секретів)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'observation_alias' }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/release.keystore" >> $GITHUB_ENV
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "MODE=release" >> $GITHUB_ENV
+            echo "Підписую твоїм ключем"
+          else
+            echo "MODE=debug" >> $GITHUB_ENV
+            echo "Секретів немає — тестовий підпис"
+          fi
+
       - name: Збірка APK
         run: |
           mkdir -p build
-          ./godot --headless --path . --export-debug "Android" build/vivarium-${GODOT_VERSION}.apk
+          ./godot --headless --path . --export-$MODE "Android" build/vivarium-0.1-$MODE.apk
           ls -la build
+          test -f build/vivarium-0.1-$MODE.apk
+
+      - name: Прибрати ключ
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore"
 
       - uses: actions/upload-artifact@v4
         with:
