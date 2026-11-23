@@ -34,7 +34,7 @@ jobs:
 
       - name: Розпакувати файли гри (усі zip-архіви)
         run: |
-          for z in assets_puppy.zip game_files.zip models_*.zip; do
+          for z in game_files.zip $(ls models_*.zip | sort -V); do
             if [ -f "$z" ]; then echo "розпаковую $z"; unzip -q -o "$z" -d . ; fi
           done
           ls -R scenes scripts assets | head -60
@@ -87,9 +87,9 @@ jobs:
       - name: Збірка APK
         run: |
           mkdir -p build
-          ./godot --headless --path . --export-$MODE "Android" build/vivarium-0.1-$MODE.apk
+          ./godot --headless --path . --export-$MODE "Android" build/dyvo-svit-$MODE.apk
           ls -la build
-          test -f build/vivarium-0.1-$MODE.apk
+          test -f build/dyvo-svit-$MODE.apk
 
       - name: Прибрати ключ
         if: always()
@@ -97,5 +97,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vivarium-apk
+          name: dyvo-svit-apk
           path: build/*.apk

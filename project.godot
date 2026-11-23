@@ -1,10 +1,10 @@
-; Затишний віварій — Godot 4.5
+; Диво-Світ — Godot 4.5
 config_version=5
 
 [application]
 
-config/name="Затишний віварій"
-config/version="0.1"
+config/name="Диво-Світ"
+config/version="0.2"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.png"
@@ -28,9 +28,9 @@ theme/custom_font="res://assets/fonts/DejaVuSans.ttf"
 [importer_defaults]
 
 texture={
-"compress/mode": 1,
+"compress/mode": 2,
 "compress/lossy_quality": 0.82,
-"mipmaps/generate": false
+"mipmaps/generate": true
 }
 
 [input_devices]
