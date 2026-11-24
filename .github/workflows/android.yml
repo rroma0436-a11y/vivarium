@@ -8,6 +8,9 @@ on:
 env:
   GODOT_VERSION: 4.5.1
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -95,7 +98,19 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/release.keystore"
 
+      - name: Опублікувати в Releases (швидке завантаження)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/dyvo-svit-$MODE.apk build/dyvo-svit.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest build/dyvo-svit.apk \
+            --title "Диво-Світ — остання збірка" \
+            --notes "Автоматична збірка з коміту ${GITHUB_SHA::7} ($MODE)." \
+            --target "$GITHUB_SHA" --latest
+
       - uses: actions/upload-artifact@v4
         with:
           name: dyvo-svit-apk
-          path: build/*.apk
+          path: build/dyvo-svit-*.apk
+          retention-days: 3
