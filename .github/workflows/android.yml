@@ -8,6 +8,10 @@ on:
 env:
   GODOT_VERSION: 4.5.1
 
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
