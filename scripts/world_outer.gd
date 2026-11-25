@@ -58,6 +58,7 @@ func build(w) -> void:
 	_make_river()
 	# комбайн тепер їздить (main.gd → combine.gd, на ньому катається Ніка)
 	_make_pond(rng)
+	_make_fish()
 	_make_wheat(rng)
 	_make_wheat_field()
 	_make_field_road()
@@ -159,7 +160,8 @@ func _make_village(rng: RandomNumberGenerator) -> void:
 		if not ResourceLoader.exists("res://assets/models/bazaar/bz_village.glb"):
 			for seg in pts:
 				_low_fence(hp + bs * (seg[0] as Vector3), hp + bs * (seg[1] as Vector3))
-	_make_yard_roads()
+	if not ResourceLoader.exists("res://assets/models/bazaar/bz_village.glb"):
+		_make_yard_roads()
 	_make_farm_buildings()
 	_make_farm_fence()
 	_make_farm_paths()
@@ -580,40 +582,42 @@ func _walk_in_shed(m: Node3D, kind: String, door_name := "") -> void:
 
 
 func _make_fountain(p: Vector3) -> void:
-	## Кам'яний фонтан: широка чаша, колона з верхньою чашею, струмені води.
+	## Фонтан: порожниста чаша з мозаїчним дном і прозорою водою, колона з верхньою чашею, струмені.
 	var n := Node3D.new()
 	n.position = p
 	add_child(n)
-	var stone := Util.mat(Color(0.78, 0.76, 0.72), 0.8)
-	var stone2 := Util.mat(Color(0.68, 0.66, 0.62), 0.85)
-	n.add_child(Util.cyl(2.7, 2.8, 0.6, stone, Vector3(0, 0.3, 0)))
-	n.add_child(Util.cyl(2.85, 2.85, 0.12, stone2, Vector3(0, 0.62, 0)))
-	var water := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 2.45
-	cm.bottom_radius = 2.45
-	cm.height = 0.02
-	cm.radial_segments = 32
-	water.mesh = cm
-	water.material_override = _water_mat()
-	water.position = Vector3(0, 0.66, 0)
-	n.add_child(water)
-	n.add_child(Util.cyl(0.32, 0.42, 1.7, stone2, Vector3(0, 1.4, 0)))
-	n.add_child(Util.cyl(1.05, 0.45, 0.32, stone, Vector3(0, 2.3, 0)))
-	var w2 := MeshInstance3D.new()
-	var cm2 := CylinderMesh.new()
-	cm2.top_radius = 0.92
-	cm2.bottom_radius = 0.92
-	cm2.height = 0.02
-	cm2.radial_segments = 24
-	w2.mesh = cm2
-	w2.material_override = _water_mat()
-	w2.position = Vector3(0, 2.45, 0)
-	n.add_child(w2)
-	n.add_child(Util.cyl(0.12, 0.16, 0.7, stone2, Vector3(0, 2.75, 0)))
-	n.add_child(Util.sphere(0.2, stone, Vector3(0, 3.15, 0)))
+	var cream := Util.mat(Color(0.93, 0.87, 0.74), 0.7)
+	var sand := Util.mat(Color(0.86, 0.74, 0.56), 0.8)
+	var plinth := Util.mat(Color(0.55, 0.47, 0.4), 0.9)
+	var turq := Util.mat(Color(0.2, 0.58, 0.66), 0.25)
+	var cobalt := Util.mat(Color(0.12, 0.28, 0.62), 0.35)
+	var gold := Util.mat(Color(0.95, 0.75, 0.3), 0.3, 0.8)
+	# нижня чаша — зовнішня стінка з кахлями, бортик, внутрішня стінка (заглибина)
+	n.add_child(_lathe(PackedVector2Array([Vector2(3.05, 0.0), Vector2(3.05, 0.12), Vector2(2.82, 0.16)]), plinth))
+	n.add_child(_lathe(PackedVector2Array([Vector2(2.82, 0.16), Vector2(2.82, 0.66)]), _tile_mat(44.0)))
+	n.add_child(_lathe(PackedVector2Array([Vector2(2.82, 0.66), Vector2(2.98, 0.7), Vector2(2.98, 0.8),
+		Vector2(2.9, 0.86), Vector2(2.52, 0.86), Vector2(2.47, 0.8)]), cream))
+	n.add_child(_lathe(PackedVector2Array([Vector2(2.47, 0.8), Vector2(2.43, 0.14)]), turq))
+	var floor_m := ShaderMaterial.new()
+	floor_m.shader = Shader.new()
+	floor_m.shader.code = _MOSAIC_SH
+	n.add_child(Util.cyl(2.44, 2.44, 0.02, floor_m, Vector3(0, 0.14, 0)))
+	n.add_child(_fountain_water(2.47, 1.12, Vector3(0, 0.62, 0)))
+	# колона
+	n.add_child(Util.cyl(0.55, 0.65, 0.25, cream, Vector3(0, 0.27, 0)))
+	n.add_child(Util.cyl(0.3, 0.4, 1.75, sand, Vector3(0, 1.27, 0)))
+	n.add_child(Util.cyl(0.37, 0.37, 0.08, cobalt, Vector3(0, 0.95, 0)))
+	n.add_child(Util.cyl(0.33, 0.33, 0.06, gold, Vector3(0, 1.95, 0)))
+	# верхня чаша
+	n.add_child(_lathe(PackedVector2Array([Vector2(0.34, 2.12), Vector2(0.8, 2.3), Vector2(1.1, 2.46)]), _tile_mat(18.0)))
+	n.add_child(_lathe(PackedVector2Array([Vector2(1.1, 2.46), Vector2(1.14, 2.56), Vector2(1.06, 2.6), Vector2(0.98, 2.54)]), cream))
+	n.add_child(_lathe(PackedVector2Array([Vector2(0.98, 2.54), Vector2(0.85, 2.42), Vector2(0.0, 2.4)]), turq))
+	n.add_child(_fountain_water(0.95, 0.35, Vector3(0, 2.5, 0)))
+	n.add_child(Util.cyl(0.1, 0.14, 0.6, cream, Vector3(0, 2.75, 0)))
+	n.add_child(Util.cyl(0.2, 0.1, 0.1, gold, Vector3(0, 3.05, 0)))
+	n.add_child(Util.sphere(0.14, gold, Vector3(0, 3.18, 0)))
 	var drop := StandardMaterial3D.new()
-	drop.albedo_color = Color(0.75, 0.9, 1.0, 0.7)
+	drop.albedo_color = Color(0.85, 0.95, 1.0, 0.6)
 	drop.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	drop.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	var dm := SphereMesh.new()
@@ -634,7 +638,7 @@ func _make_fountain(p: Vector3) -> void:
 	jet.gravity = Vector3(0, -6.5, 0)
 	jet.scale_amount_min = 0.6
 	jet.scale_amount_max = 1.0
-	jet.position = Vector3(0, 3.3, 0)
+	jet.position = Vector3(0, 3.28, 0)
 	n.add_child(jet)
 	# вода переливається з верхньої чаші вниз
 	var fall := CPUParticles3D.new()
@@ -644,8 +648,8 @@ func _make_fountain(p: Vector3) -> void:
 	fall.lifetime = 0.8
 	fall.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
 	fall.emission_ring_axis = Vector3.UP
-	fall.emission_ring_radius = 1.0
-	fall.emission_ring_inner_radius = 0.95
+	fall.emission_ring_radius = 1.14
+	fall.emission_ring_inner_radius = 1.08
 	fall.emission_ring_height = 0.01
 	fall.direction = Vector3.DOWN
 	fall.spread = 6.0
@@ -654,11 +658,195 @@ func _make_fountain(p: Vector3) -> void:
 	fall.gravity = Vector3(0, -6.0, 0)
 	fall.scale_amount_min = 0.5
 	fall.scale_amount_max = 0.8
-	fall.position = Vector3(0, 2.42, 0)
+	fall.position = Vector3(0, 2.52, 0)
 	n.add_child(fall)
-	fountain_jets = [jet, fall]
+	# бризки там, де вода падає в нижню чашу
+	var splash := CPUParticles3D.new()
+	splash.mesh = dm
+	splash.material_override = drop
+	splash.amount = 60
+	splash.lifetime = 0.35
+	splash.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+	splash.emission_ring_axis = Vector3.UP
+	splash.emission_ring_radius = 1.16
+	splash.emission_ring_inner_radius = 1.06
+	splash.emission_ring_height = 0.01
+	splash.direction = Vector3.UP
+	splash.spread = 35.0
+	splash.initial_velocity_min = 0.6
+	splash.initial_velocity_max = 1.1
+	splash.gravity = Vector3(0, -6.0, 0)
+	splash.scale_amount_min = 0.4
+	splash.scale_amount_max = 0.7
+	splash.position = Vector3(0, 0.64, 0)
+	n.add_child(splash)
+	fountain_jets = [jet, fall, splash]
 	n.add_child(Util.pick_area("fountain", Vector3(5.6, 3.2, 5.6), Vector3(0, 1.6, 0)))
 	_obst.append([p.x, p.z, 3.0, 1.0])
+
+
+func _lathe(prof: PackedVector2Array, material: Material, segs := 48) -> MeshInstance3D:
+	## Тіло обертання з профілю (r, y); нормаль — праворуч від напрямку профілю.
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var total := 0.0
+	for i in prof.size() - 1:
+		total += prof[i].distance_to(prof[i + 1])
+	var acc := 0.0
+	for i in prof.size() - 1:
+		var a := prof[i]
+		var b := prof[i + 1]
+		var ln := a.distance_to(b)
+		var d := (b - a).normalized()
+		var nr := Vector2(d.y, -d.x)
+		var va := acc / total
+		var vb := (acc + ln) / total
+		acc += ln
+		for s in segs:
+			var t0 := TAU * s / segs
+			var t1 := TAU * (s + 1) / segs
+			var a0 := Vector3(a.x * sin(t0), a.y, a.x * cos(t0))
+			var a1 := Vector3(a.x * sin(t1), a.y, a.x * cos(t1))
+			var b0 := Vector3(b.x * sin(t0), b.y, b.x * cos(t0))
+			var b1 := Vector3(b.x * sin(t1), b.y, b.x * cos(t1))
+			var n0 := Vector3(nr.x * sin(t0), nr.y, nr.x * cos(t0))
+			var n1 := Vector3(nr.x * sin(t1), nr.y, nr.x * cos(t1))
+			var u0 := float(s) / segs
+			var u1 := float(s + 1) / segs
+			for v in [[b0, n0, Vector2(u0, vb)], [b1, n1, Vector2(u1, vb)], [a1, n1, Vector2(u1, va)],
+					[b0, n0, Vector2(u0, vb)], [a1, n1, Vector2(u1, va)], [a0, n0, Vector2(u0, va)]]:
+				st.set_normal(v[1])
+				st.set_uv(v[2])
+				st.add_vertex(v[0])
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = material
+	return mi
+
+
+func _tile_mat(tiles: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = Shader.new()
+	m.shader.code = _TILE_SH
+	m.set_shader_parameter("tiles", tiles)
+	return m
+
+
+func _fountain_water(r: float, ring_r: float, pos: Vector3) -> MeshInstance3D:
+	var m := ShaderMaterial.new()
+	m.shader = Shader.new()
+	m.shader.code = _FWATER_SH
+	m.set_shader_parameter("ring_r", ring_r)
+	var cm := CylinderMesh.new()
+	cm.top_radius = r
+	cm.bottom_radius = r
+	cm.height = 0.01
+	cm.radial_segments = 40
+	cm.cap_bottom = false
+	return Util.mesh(cm, m, pos)
+
+
+const _TILE_SH := """
+shader_type spatial;
+uniform float tiles = 44.0;
+uniform vec3 base_col : source_color = vec3(0.12, 0.3, 0.62);
+uniform vec3 orn : source_color = vec3(0.96, 0.76, 0.26);
+uniform vec3 orn2 : source_color = vec3(0.78, 0.2, 0.15);
+uniform vec3 grout : source_color = vec3(0.95, 0.92, 0.84);
+void fragment() {
+	float v = UV.y;
+	vec2 f = vec2(fract(UV.x * tiles), clamp((v - 0.14) / 0.72, 0.0, 1.0));
+	float dm = abs(f.x - 0.5) + abs(f.y - 0.5);
+	float aa = fwidth(dm) + 0.01;
+	vec3 c = base_col;
+	c = mix(c, grout, smoothstep(0.44 + aa, 0.44, dm) - smoothstep(0.37 + aa, 0.37, dm));
+	c = mix(c, orn, smoothstep(0.3 + aa, 0.3, dm));
+	c = mix(c, orn2, smoothstep(0.14 + aa, 0.14, dm));
+	float g = min(f.x, 1.0 - f.x);
+	c = mix(grout, c, smoothstep(0.012, 0.03, g));
+	float band = step(v, 0.14) + step(0.86, v);
+	float zig = step(abs(fract(UV.x * tiles * 2.0) - 0.5) * 2.0, fract(v * 7.0));
+	vec3 bc = mix(orn2, orn, zig * 0.35);
+	c = mix(c, bc, clamp(band, 0.0, 1.0));
+	float line = smoothstep(0.012, 0.0, abs(v - 0.14)) + smoothstep(0.012, 0.0, abs(v - 0.86));
+	c = mix(c, grout, clamp(line, 0.0, 1.0));
+	ALBEDO = c;
+	ROUGHNESS = 0.3;
+	SPECULAR = 0.6;
+}
+"""
+
+const _MOSAIC_SH := """
+shader_type spatial;
+varying vec2 lp;
+float hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float nz(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hh(i), hh(i + vec2(1, 0)), f.x), mix(hh(i + vec2(0, 1)), hh(i + vec2(1, 1)), f.x), f.y);
+}
+void vertex() { lp = VERTEX.xz; }
+void fragment() {
+	float r = length(lp);
+	float a = atan(lp.y, lp.x);
+	vec2 g = lp / 0.09;
+	vec2 id = floor(g);
+	vec2 f = fract(g);
+	float n = hh(id);
+	vec3 c = mix(vec3(0.15, 0.6, 0.65), vec3(0.32, 0.76, 0.76), n);
+	float star = 0.42 + 0.3 * pow(abs(cos(a * 4.0)), 3.0);
+	if (r < star) c = mix(vec3(0.98, 0.8, 0.32), vec3(1.0, 0.93, 0.62), n);
+	else if (r < 0.95) c = mix(vec3(0.1, 0.24, 0.6), vec3(0.16, 0.32, 0.7), n);
+	else if (r < 1.05) c = vec3(0.95, 0.93, 0.85);
+	else if (r > 2.05 + 0.08 * sin(a * 16.0)) c = mix(vec3(0.1, 0.26, 0.6), vec3(0.16, 0.34, 0.7), n);
+	c *= 0.88 + 0.2 * hh(id + 7.0);
+	float edge = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
+	c = mix(vec3(0.62, 0.62, 0.58), c, smoothstep(0.04, 0.1, edge));
+	float ca = nz(lp * 3.0 + vec2(TIME * 0.4, TIME * 0.25)) * nz(lp * 4.3 - vec2(TIME * 0.3, -TIME * 0.35));
+	c += vec3(0.28, 0.33, 0.33) * smoothstep(0.25, 0.6, ca);
+	ALBEDO = c;
+	ROUGHNESS = 0.5;
+}
+"""
+
+const _FWATER_SH := """
+shader_type spatial;
+render_mode blend_mix, depth_draw_opaque, cull_back, specular_schlick_ggx;
+uniform vec3 tint : source_color = vec3(0.5, 0.82, 0.88);
+uniform vec3 sky : source_color = vec3(0.72, 0.85, 0.95);
+uniform float ring_r = 1.0;
+varying vec2 lp;
+float hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float nz(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hh(i), hh(i + vec2(1, 0)), f.x), mix(hh(i + vec2(0, 1)), hh(i + vec2(1, 1)), f.x), f.y);
+}
+float rip(vec2 p, float t) {
+	return nz(p * 3.0 + vec2(t * 0.5, t * 0.3)) * 0.6 + nz(p * 7.0 - vec2(t * 0.4, -t * 0.6)) * 0.4;
+}
+void vertex() { lp = VERTEX.xz; }
+void fragment() {
+	vec3 V = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+	float e = 0.04;
+	float r0 = rip(lp, TIME);
+	vec2 dg = vec2(rip(lp + vec2(e, 0.0), TIME) - r0, rip(lp + vec2(0.0, e), TIME) - r0) / e * 0.05;
+	float r = length(lp);
+	float d = abs(r - ring_r);
+	vec2 dir = lp / max(r, 0.001) * sign(r - ring_r);
+	vec2 rg = dir * cos(d * 30.0 - TIME * 7.0) * exp(-d * 3.5) * 0.08;
+	vec3 nw = normalize(vec3(-(dg.x + rg.x), 1.0, -(dg.y + rg.y)));
+	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
+	float fres = 0.02 + 0.98 * pow(1.0 - clamp(dot(nw, V), 0.0, 1.0), 5.0);
+	vec3 col = mix(tint, sky, fres);
+	float alpha = mix(0.2, 0.9, fres);
+	float foam = exp(-d * 9.0) * (0.5 + 0.5 * nz(lp * 6.0 + vec2(TIME * 1.5, -TIME)));
+	col = mix(col, vec3(0.97), foam * 0.7);
+	alpha = max(alpha, foam * 0.7);
+	ALBEDO = col;
+	ALPHA = clamp(alpha, 0.0, 1.0);
+	ROUGHNESS = 0.03;
+	SPECULAR = 0.7;
+}
+"""
 
 
 var _fence_post: Material
@@ -708,37 +896,209 @@ func _make_church(p: Vector3) -> void:
 
 
 # ------------------------------------------------------------------ вода
-func _water_mat() -> ShaderMaterial:
-	var sh := Shader.new()
-	sh.code = """
+const RIVER_FLOW := Vector2(0.7, 0.0)          # куди й як швидко тече річка (м/с)
+const RIVER_DEPTH := 1.6
+const POND_DEPTH := 2.0
+
+const _WATER_SH := """
 shader_type spatial;
-render_mode specular_schlick_ggx;
+render_mode blend_mix, depth_draw_opaque, cull_back, specular_schlick_ggx;
+uniform vec2 flow = vec2(0.0);
+uniform float amp = 1.0;
+uniform float fixed_depth = -1.0;
+uniform vec3 shallow : source_color = vec3(0.3, 0.55, 0.5);
+uniform vec3 deep : source_color = vec3(0.04, 0.2, 0.26);
+uniform vec3 sky : source_color = vec3(0.62, 0.77, 0.9);
 varying vec3 wp;
-void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+varying float dep;
+varying vec2 wg;
+float hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float nz(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hh(i), hh(i + vec2(1, 0)), f.x), mix(hh(i + vec2(0, 1)), hh(i + vec2(1, 1)), f.x), f.y);
+}
+void wave(vec2 p, vec2 d, float f, float a, float s, float t, inout float h, inout vec2 g) {
+	float ph = dot(d, p) * f + t * s;
+	h += a * sin(ph);
+	g += a * f * d * cos(ph);
+}
+float ripple(vec2 p, float t) {
+	return nz(p * 1.7 + vec2(t * 0.35, t * 0.22)) * 0.55 + nz(p * 4.1 - vec2(t * 0.3, -t * 0.45)) * 0.3
+		+ nz(p * 9.0 + vec2(-t * 0.6, t * 0.5)) * 0.15;
+}
+void vertex() {
+	wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	dep = fixed_depth >= 0.0 ? fixed_depth : UV.x;
+	// хвилі: три хвилі різної довжини й напрямку; біля берега стихають
+	float k = amp * smoothstep(0.08, 0.9, dep);
+	vec2 p = wp.xz - flow * TIME * 0.6;
+	float h = 0.0;
+	vec2 g = vec2(0.0);
+	wave(p, vec2(0.8, 0.6), 0.9, 0.035, 1.3, TIME, h, g);
+	wave(p, vec2(-0.5, 0.866), 1.4, 0.022, 1.7, TIME, h, g);
+	wave(p, vec2(0.196, -0.98), 2.3, 0.012, 2.2, TIME, h, g);
+	VERTEX.y += h * k;
+	wg = g * k;
+}
 void fragment() {
-	float r = sin(wp.x * 1.3 + TIME * 1.5) * 0.5 + sin(wp.z * 1.7 - TIME * 1.1 + wp.x * 0.4) * 0.5;
-	ALBEDO = mix(vec3(0.18, 0.42, 0.62), vec3(0.32, 0.6, 0.78), r * 0.25 + 0.4);
-	ROUGHNESS = 0.08;
+	vec3 V = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+	float dist = length(VERTEX);
+	// дрібна брижа, пливе за течією
+	vec2 q = wp.xz - flow * TIME;
+	float e = 0.05;
+	float r0 = ripple(q, TIME);
+	vec2 dg = vec2(ripple(q + vec2(e, 0.0), TIME) - r0, ripple(q + vec2(0.0, e), TIME) - r0) / e;
+	dg *= 0.07 * (1.0 - smoothstep(25.0, 120.0, dist));
+	vec3 nw = normalize(vec3(-(wg.x + dg.x), 1.0, -(wg.y + dg.y)));
+	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
+	// прозорість: що глибше й що навскісніше дивишся — то густіший колір води
+	float d = max(dep, 0.0);
+	float path = d / max(V.y, 0.2);
+	float absorb = 1.0 - exp(-path * 1.4);
+	vec3 col = mix(shallow, deep, absorb);
+	float alpha = mix(0.08, 0.93, absorb);
+	// відблиск неба: збоку вода — як дзеркало, згори — видно дно
+	float fres = 0.02 + 0.98 * pow(1.0 - clamp(dot(nw, V), 0.0, 1.0), 5.0);
+	col = mix(col, sky, fres * 0.85);
+	alpha = mix(alpha, 1.0, fres);
+	// піна біля берега
+	float shore = smoothstep(0.0, 0.06, dep);
+	float fb = 1.0 - smoothstep(0.07, 0.32, dep);
+	float foam = fb * smoothstep(0.5, 0.8, nz(wp.xz * 2.2 + vec2(TIME * 0.3, -TIME * 0.2)) + 0.25 * sin(TIME * 1.5 + dep * 20.0));
+	col = mix(col, vec3(0.93, 0.95, 0.95), foam * 0.8);
+	alpha = max(alpha, foam * 0.8);
+	ALBEDO = col;
+	ALPHA = clamp(alpha * shore, 0.0, 1.0);
+	ROUGHNESS = 0.04;
 	METALLIC = 0.0;
-	SPECULAR = 0.7;
-	NORMAL_MAP = vec3(0.5 + r * 0.05, 0.5 + r * 0.04, 1.0);
+	SPECULAR = 0.6;
 }
 """
+
+const _BED_SH := """
+shader_type spatial;
+render_mode diffuse_lambert, specular_disabled;
+uniform sampler2D sand_tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform float use_tex = 0.0;
+uniform vec2 flow = vec2(0.0);
+varying vec3 wp;
+varying float dep;
+float hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float nz(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hh(i), hh(i + vec2(1, 0)), f.x), mix(hh(i + vec2(0, 1)), hh(i + vec2(1, 1)), f.x), f.y);
+}
+float caus(vec2 p, float t) {
+	vec2 w = p + vec2(sin(p.y * 1.7 + t * 0.9), cos(p.x * 1.3 - t * 0.7)) * 0.45;
+	float a = abs(sin(w.x * 2.1 + t * 0.6) + sin(w.y * 2.3 - t * 0.5));
+	float b = abs(sin((w.x + w.y) * 1.6 - t * 0.8) + sin((w.x - w.y) * 1.9 + t * 0.4));
+	return pow(clamp(1.0 - min(a, b) * 0.6, 0.0, 1.0), 5.0);
+}
+void vertex() {
+	wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	dep = UV.x;
+}
+void fragment() {
+	vec2 p = wp.xz;
+	vec3 sand = vec3(0.78, 0.7, 0.5);
+	sand = mix(sand, sand * texture(sand_tex, p / 2.6).rgb / vec3(0.83, 0.70, 0.55), use_tex);
+	vec3 mud = vec3(0.3, 0.29, 0.2) * (0.85 + nz(p * 0.9) * 0.3);
+	vec3 c = mix(sand, mud, smoothstep(0.15, 1.3, dep));
+	c *= 0.82 + nz(p * 6.0) * 0.25;                        // камінчики й мулисті плями
+	// сонячні відблиски на дні (каустика), пливуть за течією
+	float ca = caus(p * 1.3 - flow * TIME * 0.5, TIME);
+	c += vec3(0.85, 0.95, 0.8) * ca * 0.28 * (1.0 - smoothstep(0.2, 2.0, dep));
+	ALBEDO = c;
+	ROUGHNESS = 1.0;
+}
+"""
+
+
+func _water_mat(flow := Vector2.ZERO, amp := 1.0, fixed_depth := -1.0) -> ShaderMaterial:
+	var sh := Shader.new()
+	sh.code = _WATER_SH
 	var m := ShaderMaterial.new()
 	m.shader = sh
+	m.set_shader_parameter("flow", flow)
+	m.set_shader_parameter("amp", amp)
+	m.set_shader_parameter("fixed_depth", fixed_depth)
 	return m
 
 
+func _bed_mat(flow := Vector2.ZERO) -> ShaderMaterial:
+	var sh := Shader.new()
+	sh.code = _BED_SH
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	m.set_shader_parameter("flow", flow)
+	if ResourceLoader.exists("res://assets/textures/sand.jpg"):
+		m.set_shader_parameter("sand_tex", load("res://assets/textures/sand.jpg"))
+		m.set_shader_parameter("use_tex", 1.0)
+	return m
+
+
+func _water_body(x0: float, x1: float, z0: float, z1: float, sx: float, sz: float, depth_of: Callable, flow: Vector2) -> void:
+	## Дно (русло, чаша ставка) і вода над ним — дві сітки з однаковими точками.
+	## depth_of(p) — глибина під землею (м), від'ємна — уже берег.
+	var nx := int(ceil((x1 - x0) / sx))
+	var nzc := int(ceil((z1 - z0) / sz))
+	var w := nx + 1
+	var dep := PackedFloat32Array()
+	dep.resize(w * (nzc + 1))
+	for j in nzc + 1:
+		for i in w:
+			dep[j * w + i] = float(depth_of.call(Vector3(x0 + i * sx, 0, z0 + j * sz)))
+	var bv := PackedVector3Array()
+	var bn := PackedVector3Array()
+	var wv := PackedVector3Array()
+	var wn := PackedVector3Array()
+	var uv := PackedVector2Array()
+	var wuv := PackedVector2Array()
+	for j in nzc + 1:
+		for i in w:
+			var x := x0 + i * sx
+			var z := z0 + j * sz
+			var d: float = dep[j * w + i]
+			var yl := -maxf(dep[j * w + maxi(i - 1, 0)], 0.0)
+			var yr := -maxf(dep[j * w + mini(i + 1, nx)], 0.0)
+			var yd := -maxf(dep[maxi(j - 1, 0) * w + i], 0.0)
+			var yu := -maxf(dep[mini(j + 1, nzc) * w + i], 0.0)
+			bv.append(Vector3(x, -maxf(d, 0.0) - 0.015, z))
+			bn.append(Vector3(-(yr - yl) / (2.0 * sx), 1.0, -(yu - yd) / (2.0 * sz)).normalized())
+			uv.append(Vector2(maxf(d, 0.0), 0))
+			wv.append(Vector3(x, 0.05, z))
+			wn.append(Vector3.UP)
+			wuv.append(Vector2(d + 0.065, 0))
+	var idx := PackedInt32Array()
+	for j in nzc:
+		for i in nx:
+			var a := j * w + i
+			if maxf(maxf(dep[a], dep[a + 1]), maxf(dep[a + w], dep[a + w + 1])) < -0.6:
+				continue
+			for k in [a, a + 1, a + w, a + 1, a + w + 1, a + w]:
+				idx.append(k)
+	for pair in [[bv, bn, uv, _bed_mat(flow)], [wv, wn, wuv, _water_mat(flow)]]:
+		var arr := []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = pair[0]
+		arr[Mesh.ARRAY_NORMAL] = pair[1]
+		arr[Mesh.ARRAY_TEX_UV] = pair[2]
+		arr[Mesh.ARRAY_INDEX] = idx
+		var am := ArrayMesh.new()
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		var mi := MeshInstance3D.new()
+		mi.mesh = am
+		mi.material_override = pair[3]
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+
+
 func _make_river() -> void:
-	var water := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(LIMIT * 2.4, RIVER_W)
-	pm.subdivide_width = 40
-	water.mesh = pm
-	water.material_override = _water_mat()
-	water.position = Vector3(0, 0.04, RIVER_Z)
-	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(water)
+	# русло: біля берега мілко, посередині — RIVER_DEPTH; вода тече вздовж x
+	var river_depth := func(p: Vector3) -> float:
+		var e := RIVER_W / 2.0 - absf(p.z - RIVER_Z)
+		return RIVER_DEPTH * smoothstep(0.0, 3.0, e) if e > 0.0 else e
+	_water_body(-LIMIT * 1.2, LIMIT * 1.2, RIVER_Z - RIVER_W / 2.0 - 0.5, RIVER_Z + RIVER_W / 2.0 + 0.5, 2.0, 0.5, river_depth, RIVER_FLOW)
 	# дерев'яний місток на дорозі
 	var plank: Material = world._planks_mat(Color(0.55, 0.4, 0.26), true)
 	var post := Util.mat(Color(0.4, 0.28, 0.18), 0.9)
@@ -752,6 +1112,8 @@ func _make_river() -> void:
 		for k in 7:
 			var z := RIVER_Z - (RIVER_W + 4.0) / 2.0 + k * (RIVER_W + 4.0) / 6.0
 			add_child(Util.cyl(0.07, 0.08, 1.2, post, Vector3(side * 1.6, 0.6, z)))
+			if absf(z - RIVER_Z) < RIVER_W / 2.0:
+				add_child(Util.cyl(0.1, 0.11, 2.0, post, Vector3(side * 1.6, -0.8, z)))    # палі мосту — до самого дна
 	# очерет уздовж берегів
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 5
@@ -769,6 +1131,16 @@ static func pond_sd(p: Vector3) -> float:
 	## Відстань від точки до берега ставка (від'ємна — у воді).
 	var q := Vector2(absf(p.x - POND.x), absf(p.z - POND.z)) - (POND_HALF - Vector2(POND_CORNER, POND_CORNER))
 	return Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length() + minf(maxf(q.x, q.y), 0.0) - POND_CORNER
+
+
+func water_depth(p: Vector3) -> float:
+	## Глибина води в точці (річка або ставок), м; ≤ 0 — суша.
+	var e := RIVER_W / 2.0 - absf(p.z - RIVER_Z)
+	var d := RIVER_DEPTH * smoothstep(0.0, 3.0, e) if e > 0.0 else e
+	var sd := pond_sd(p)
+	if sd < 0.0:
+		d = maxf(d, POND_DEPTH * smoothstep(0.0, 7.0, -sd))
+	return d
 
 
 func _pond_t(a: float) -> float:
@@ -799,29 +1171,12 @@ func _pond_outline(off := 0.0, seg := 8) -> PackedVector2Array:
 
 
 func _make_pond(rng: RandomNumberGenerator) -> void:
-	## Ставок — прямокутний, із заокругленими краями.
-	var water := MeshInstance3D.new()
-	var outline := _pond_outline()
-	var verts := PackedVector3Array()
-	var norms := PackedVector3Array()
-	for i in outline.size():
-		var a := outline[i]
-		var b := outline[(i + 1) % outline.size()]
-		verts.append(Vector3.ZERO)
-		verts.append(Vector3(a.x - POND.x, 0, a.y - POND.z))
-		verts.append(Vector3(b.x - POND.x, 0, b.y - POND.z))
-		for k in 3:
-			norms.append(Vector3.UP)
-	var arr := []
-	arr.resize(Mesh.ARRAY_MAX)
-	arr[Mesh.ARRAY_VERTEX] = verts
-	arr[Mesh.ARRAY_NORMAL] = norms
-	var am := ArrayMesh.new()
-	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-	water.mesh = am
-	water.material_override = _water_mat()
-	water.position = POND + Vector3(0, 0.05, 0)
-	add_child(water)
+	## Ставок — прямокутний, із заокругленими краями; чаша полого йде вглиб до POND_DEPTH посередині.
+	var pond_depth := func(p: Vector3) -> float:
+		var sd := pond_sd(p)
+		return POND_DEPTH * smoothstep(0.0, 7.0, -sd) if sd < 0.0 else -sd
+	_water_body(POND.x - POND_HALF.x - 1.0, POND.x + POND_HALF.x + 1.0, POND.z - POND_HALF.y - 1.0, POND.z + POND_HALF.y + 1.0,
+		0.7, 0.7, pond_depth, Vector2(0.08, 0.05))
 	var pts: Array = []
 	for i in 140:
 		var a := rng.randf() * TAU
@@ -873,6 +1228,17 @@ func _make_pond(rng: RandomNumberGenerator) -> void:
 		prev = q
 	for x in [-7.0, 0.0, 7.0]:
 		_obst.append([POND.x + x, POND.z, POND_HALF.y - 0.5, 0.1])
+
+
+# ------------------------------------------------------------------ риби у ставку й у річці (fish.gd)
+var fish: Node3D
+
+
+func _make_fish() -> void:
+	fish = preload("res://scripts/fish.gd").new()
+	fish.name = "Fish"
+	add_child(fish)
+	fish.setup(self)
 
 
 # ------------------------------------------------------------------ осока біля озера: росте й розмножується

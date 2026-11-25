@@ -11,6 +11,10 @@ var carry_l := 0.0      # те саме лівою рукою (річ у лів�
 var ride := 0.0          # верхи на драконі: ноги по боках спини, руки тримаються попереду
 var life := 0.0         # стоїть на місці: дихає, ледь гойдається, роззирається
 var lean := 0.0         # нахил тулуба вперед (радіани; трактор: тягнеться до керма, лізе вгору)
+var swim := 0.0         # пливе (вага пози 0..1)
+var swim_move := 0.0    # 0 — тримається на воді (ноги «велосипед», долоні гребуть туди-сюди), 1 — пливе брасом
+var swim_ph := 0.0      # фаза гребка 0..1
+var body_node: Node3D   # тіло, що лежить на воді: його «вгору» — до голови, «вперед» — груди
 ## Кисті й ступні в задані точки (IK на дві кістки): "LeftHand"/"RightHand"/"LeftFoot"/"RightFoot" →
 ## [точка у світі (Vector3), вага 0..1]. Лікті йдуть донизу й убік, коліна — вперед.
 var ik := {}
@@ -57,10 +61,13 @@ func _process_modification() -> void:
 	var sk := get_skeleton()
 	if sk == null or axis_node == null:
 		return
-	if life > 0.001:
+	if life > 0.001 and swim < 0.5:
 		_alive(sk)
 	if absf(lean) > 0.001 or not ik.is_empty():
 		_reach(sk)
+	if swim > 0.001:
+		_swim(sk)
+		return
 	if sit < 0.001 and drink < 0.001 and carry < 0.001 and carry_l < 0.001 and ride < 0.001:
 		return
 	var inv := sk.global_transform.basis.inverse()
@@ -196,3 +203,58 @@ func _ik2(sk: Skeleton3D, upper: String, lower: String, end: String, t: Vector3,
 	_aim(sk, upper, lower, elbow - a, w)
 	var b2 := sk.get_bone_global_pose(bl).origin
 	_aim(sk, lower, end, a + dir * d - b2, w)
+
+
+# ------------------------------------------------------------------ плавання
+# брас: [фаза, плече, передпліччя, стегно, гомілка]; вектор — (до голови, у бік грудей, убік назовні)
+const BRASS := [
+	[0.0, Vector3(1.0, 0.18, 0.1), Vector3(1.0, 0.12, -0.02), Vector3(-1.0, 0.05, 0.07), Vector3(-1.0, -0.06, 0.05)],     # ковзає, руки витягнуті
+	[0.3, Vector3(1.0, 0.18, 0.1), Vector3(1.0, 0.12, -0.02), Vector3(-1.0, 0.05, 0.07), Vector3(-1.0, -0.06, 0.05)],
+	[0.55, Vector3(0.45, 0.4, 0.85), Vector3(0.2, 0.9, 0.3), Vector3(-1.0, 0.08, 0.08), Vector3(-1.0, -0.06, 0.05)],     # руки розводить і гребе
+	[0.72, Vector3(-0.05, 0.65, 0.6), Vector3(0.55, 0.3, -0.8), Vector3(-0.7, 0.5, 0.45), Vector3(0.55, -0.75, 0.35)],   # долоні під підборіддям, п'яти — до себе
+	[0.86, Vector3(0.75, 0.4, 0.2), Vector3(0.95, 0.25, -0.1), Vector3(-0.85, 0.12, 0.6), Vector3(-0.6, -0.25, 0.65)],   # руки вперед, ноги штовхають
+	[1.0, Vector3(1.0, 0.18, 0.1), Vector3(1.0, 0.12, -0.02), Vector3(-1.0, 0.05, 0.07), Vector3(-1.0, -0.06, 0.05)],
+]
+
+
+func _brass(t: float) -> Array:
+	for i in BRASS.size() - 1:
+		var a: Array = BRASS[i]
+		var b: Array = BRASS[i + 1]
+		if t <= float(b[0]):
+			var u := smoothstep(0.0, 1.0, (t - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.001))
+			return [(a[1] as Vector3).lerp(b[1], u), (a[2] as Vector3).lerp(b[2], u), (a[3] as Vector3).lerp(b[3], u), (a[4] as Vector3).lerp(b[4], u)]
+	var l: Array = BRASS[BRASS.size() - 1]
+	return [l[1], l[2], l[3], l[4]]
+
+
+func _swim(sk: Skeleton3D) -> void:
+	var bn: Node3D = body_node if body_node else axis_node
+	var inv := sk.global_transform.basis.inverse()
+	var U := (inv * bn.global_transform.basis.y).normalized()     # до голови
+	var F := (inv * bn.global_transform.basis.z).normalized()     # груди (у воді — донизу)
+	var S := (inv * bn.global_transform.basis.x).normalized()     # уліво
+	var k := _brass(swim_ph)
+	var a := swim_ph * TAU
+	var m := swim_move
+	var w := swim
+	for s in ["Left", "Right"]:
+		var sd := S if s == "Left" else -S
+		var off := 0.0 if s == "Left" else PI
+		# тримається на воді: долоні гребуть туди-сюди перед грудьми, ноги по черзі крутять «велосипед»
+		var t_au := Vector3(-0.25, 0.7, 0.6 + 0.1 * sin(a))
+		var t_af := Vector3(-0.1, 0.8, 0.1 + 0.55 * sin(a + 0.6))
+		var t_lt := Vector3(-0.85, 0.3 + 0.3 * sin(a * 2.0 + off), 0.18)
+		var t_ls := Vector3(-0.9, -0.2 - 0.35 * sin(a * 2.0 + off + 1.2), 0.12)
+		var segs := [[s + "Arm", s + "ForeArm", t_au.lerp(k[0], m)], [s + "ForeArm", s + "Hand", t_af.lerp(k[1], m)],
+			[s + "UpLeg", s + "Leg", t_lt.lerp(k[2], m)], [s + "Leg", s + "Foot", t_ls.lerp(k[3], m)]]
+		for sg in segs:
+			var c: Vector3 = sg[2]
+			_aim(sk, sg[0], sg[1], U * c.x + F * c.y + sd * c.z, w)
+		_aim(sk, s + "Foot", s + "ToeBase", -U * 0.9 - F * 0.3 + sd * 0.1, w * 0.8)     # носки витягнуті
+	# спина ледь прогинається, коли гребе руками; голова над водою дивиться вперед, на вдиху — трохи вище
+	var pull := maxf(0.0, sin((swim_ph - 0.4) * TAU)) * m
+	_rot(sk, "Spine1" if _b.get("Spine1", -1) >= 0 else "Spine", S, -0.12 * pull * w)
+	var bend := w * lerpf(0.2, 0.7, m)
+	_rot(sk, "Neck", S, -bend * 0.5)
+	_rot(sk, "Head", S, -bend * 0.45 - 0.15 * pull * w)

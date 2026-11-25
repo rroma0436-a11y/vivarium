@@ -64,6 +64,12 @@ func pedal_global(left: bool) -> Vector3:
 	return p.global_transform * Vector3(0.07 if left else -0.07, 0, 0)
 
 
+func set_tilt(a: float) -> void:
+	## Нахиляє велосипед уліво (до Ніки), коли вона на нього сідає чи злазить.
+	if model:
+		model.rotation.z = -a
+
+
 func ride_anim(v: float, steer_to: float, dt: float) -> void:
 	## v — швидкість (м/с), steer_to — куди повернуто кермо (рад).
 	_grip_init()

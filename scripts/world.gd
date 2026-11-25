@@ -47,6 +47,7 @@ func _ready() -> void:
 	_make_horizon()
 	_make_yard()
 	_make_room()
+	_make_portal()
 	_make_fireflies()
 	_register_obstacles()
 	update_time(true)
@@ -105,14 +106,22 @@ void sky() {
 
 
 var in_building := false               # Ніка всередині хати, ларька чи церкви (main.gd)
+var _sun_h := -1.0                     # година для сонця (плавна)
 
 
 func update_time(_force := false) -> void:
 	## Сонце, місяць, кольори неба й туману, вогники — за часом доби з Game.
 	var h := Game.hour()
 	var n := Game.night_amount()
+	# годинник гри йде кроками (раз на пів секунди) — сонце й тіні рухаємо плавно щокадру, без ривків
+	var dh := wrapf(h - _sun_h, -12.0, 12.0)
+	if _force or _sun_h < 0.0 or absf(dh) > 0.25:
+		_sun_h = h
+	else:
+		var dt := get_process_delta_time()
+		_sun_h = wrapf(_sun_h + dt * 24.0 / Game.DAY_SECONDS + dh * (1.0 - exp(-dt * 0.5)), 0.0, 24.0)
 	# сонце: сходить о 6 на сході, о 13 найвище, сідає о 20 на заході
-	var k := clampf((h - 6.0) / 14.0, 0.0, 1.0)
+	var k := clampf((_sun_h - 6.0) / 14.0, 0.0, 1.0)
 	var elev := sin(k * PI) * 58.0 + 4.0
 	sun.rotation_degrees = Vector3(-elev, lerpf(-100.0, 100.0, k), 0)
 	# тепле світло зранку й увечері, біле вдень
@@ -120,7 +129,7 @@ func update_time(_force := false) -> void:
 	var sun_col := Color(1.0, 0.72, 0.5).lerp(Color(1.0, 0.96, 0.9), warm)
 	sun.light_color = sun_col
 	var indoor: bool = Game.state["location"] == "room"
-	sun.light_energy = 0.86 * (1.0 - n) * (0.35 if indoor else (0.45 if in_building else 1.0))
+	sun.light_energy = 0.86 * (1.0 - n) * (lerpf(0.35, 1.0, _portal_k) if indoor else (0.45 if in_building else 1.0))
 	# Ніка в хаті чи церкві: сонячні тіні вимкнено — інакше світло між колодами й вікнами
 	# лягає смугами на підлогу, і вона мерехтить, коли камера рухається
 	sun.shadow_enabled = not in_building
@@ -130,7 +139,7 @@ func update_time(_force := false) -> void:
 	var amb_day := Color(0.78, 0.8, 0.86)
 	var amb_night := Color(0.22, 0.27, 0.45)
 	env.ambient_light_color = amb_day.lerp(amb_night, n)
-	env.ambient_light_energy = lerpf(0.5, 0.55, n) * (0.55 if indoor else 1.0)
+	env.ambient_light_energy = lerpf(0.5, 0.55, n) * (lerpf(0.55, 1.0, _portal_k) if indoor else 1.0)
 	var dusk := clampf(1.0 - abs(n - 0.5) * 2.0, 0.0, 1.0)     # найбільше на межі дня й ночі
 	var tint := Color(0.86, 0.86, 0.88).lerp(Color(0.95, 0.78, 0.72), dusk * 0.8)
 	sky_mat.set_shader_parameter("night", n)
@@ -157,6 +166,7 @@ func update_time(_force := false) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	_portal_step(delta)
 	update_time()
 	# двері, які хтось забув зачинити, зачиняються самі
 	for n in _door_open_t.keys():
@@ -167,7 +177,7 @@ func _process(delta: float) -> void:
 		water_bowl_water.visible = float(Game.state.get("water_bowl", 0.0)) > 1.0
 		trough_water.visible = float(Game.state.get("trough", 0.0)) > 1.0
 		grain.visible = float(Game.state.get("hens_fed", 0.0)) > 40.0
-		if room_door_light:
+		if room_door_light and room_door_light.material_override is StandardMaterial3D:
 			(room_door_light.material_override as StandardMaterial3D).albedo_color = Color(0.85, 0.92, 0.75).lerp(Color(0.08, 0.1, 0.22), Game.night_amount())
 		_field_t += delta
 		if _field_t > 0.1:
@@ -202,6 +212,11 @@ float seg(vec2 p, vec2 a, vec2 b) {
 void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
 	vec2 p = wp.xz;
+	// де вода — землі нема: крізь прозору воду видно справжнє дно русла й ставка (world_outer.gd)
+	vec2 wq = abs(p - vec2(-70.0, 31.0)) - vec2(15.0, 8.0);
+	if (abs(p.y - 102.0) < 4.0 || length(max(wq, vec2(0.0))) + min(max(wq.x, wq.y), 0.0) - 6.0 < 0.0) {
+		discard;
+	}
 	float n = nz(p * 0.18) * 0.55 + nz(p * 0.7) * 0.3 + nz(p * 3.0) * 0.15;
 	vec3 g = mix(grass_a, grass_b, n);
 	vec3 gt = texture(grass_tex, p / 3.2).rgb;
@@ -589,11 +604,7 @@ func _make_workshop() -> void:
 
 func _make_kid_home() -> void:
 	## Хата Тарасика за дорогою (туди ввечері йдуть Тарасик і Гвинтик).
-	var h := Models.spawn(yard_root, "kid_house", 4.6)
-	if h:
-		h.position = KID_HOME
-		h.rotation.y = PI
-		make_house_door(h, AABB(Vector3(-4.6, 0.12, 2.8), Vector3(0.95, 2.3, 2.7)), "kid_door")
+	# саму будівлю прибрано (на прохання) — лишилося тільки місце, куди вони йдуть
 	spots["kid_home"] = KID_HOME + Vector3(2.5, 0, -3.0)
 	spots["outside_gate"] = Vector3(0, 0, 7.0)
 	spots["inside_gate"] = Vector3(0, 0, 3.6)
@@ -971,8 +982,8 @@ func _register_obstacles() -> void:
 	# кімната
 	var R := ROOM
 	Obstacles.add_line(Vector2(R.x + 1.2, R.z + 1.95), Vector2(R.x + 2.0, R.z + 1.95), 0.45, 0.95)
-	Obstacles.add(R.x - 1.5, R.z + 0.9, 0.5, 1.0)
-	Obstacles.add(R.x - 0.8, R.z + 1.5, 0.25, 0.45)
+	Obstacles.add(R.x - 2.96, R.z - 0.2, 0.5, 1.0)
+	Obstacles.add(R.x - 3.0, R.z + 0.85, 0.3, 0.45)
 	Obstacles.add(R.x - 0.3, R.z - 2.45, 0.35, 1.6)
 	Obstacles.add_line(Vector2(R.x + 3.1, R.z - 0.3), Vector2(R.x + 3.1, R.z + 0.9), 0.45, 2.0)
 	Obstacles.add(R.x - 3.0, R.z + 2.0, 0.45, 0.6)
@@ -1033,6 +1044,10 @@ func _props_yard(rng: RandomNumberGenerator) -> void:
 		if not props.has(pr[0]):
 			props[pr[0]] = []
 		props[pr[0]].append(n)
+		if pr[0] in ["bench", "rocking_chair", "chair"]:
+			var fa := furn_proxy(n, "sit")       # на лаву й стільці біля хати Ніка теж сідає
+			if fa and pr[0] == "rocking_chair":
+				fa.set_meta("seat", Vector3(0, 0.42, -0.1))   # посередині сидіння, спиною до спинки (а не на передньому краю)
 	spots["coop"] = Vector3(6.6, 0, -1.6)
 	spots["coop_door"] = Vector3(6.75, 0, -1.6)
 	spots["grain"] = Vector3(5.0, 0, -0.6)
@@ -1043,7 +1058,7 @@ func _props_yard(rng: RandomNumberGenerator) -> void:
 	spots["bench_seat"] = Vector3(4.6, 0, -6.25)
 	spots["firewood_front"] = Vector3(-3.35, 0, -8.95)
 	spots["room_door"] = ROOM + Vector3(-2.0, 0, 2.0)
-	spots["armchair"] = ROOM + Vector3(-1.5, 0, 0.9)
+	spots["armchair"] = ROOM + Vector3(-2.96, 0, -0.2)
 	_make_water_things()
 	_make_field()
 	_make_bees()
@@ -1506,9 +1521,9 @@ void fragment() {
 		room_root.add_child(Util.sphere(0.07, band if i % 2 == 0 else red, Vector3(W / 2.0 - 1.5 + i * 0.3, 1.25, -D / 2.0 + 1.61), Vector3(1, 1, 0.3)))
 	var room_props := [
 		["sofa", 0.95, Vector3(1.6, 0, 1.9), 180.0],
-		["armchair", 1.0, Vector3(-1.5, 0, 0.9), 130.0],
-		["stool", 0.45, Vector3(-0.8, 0, 1.5), 0.0],
-		["jug", 0.3, Vector3(-0.8, 0.41, 1.5), 0.0],
+		["armchair", 1.0, Vector3(-2.96, 0, -0.2), 90.0],      # до лівої стіни, ближче до тераріуму (не одразу за дверима)
+		["stool", 0.45, Vector3(-3.0, 0, 0.85), 0.0],
+		["jug", 0.3, Vector3(-3.0, 0.41, 0.85), 0.0],
 		["shelf", 1.6, Vector3(-0.3, 0, -2.55), 0.0],
 		["wardrobe", 2.0, Vector3(3.15, 0, 0.3), -90.0],
 		["chest", 0.6, Vector3(-3.0, 0, 2.0), 90.0],
@@ -1549,6 +1564,10 @@ void fragment() {
 		fcs.shape = fbx
 		fcs.transform = fn.transform * Transform3D(Basis(), Vector3(fab.get_center().x, fab.position.y + fh * 0.5, fab.get_center().z))
 		fsb.add_child(fcs)
+	# Ніка сідає в крісло й на диван, лягає на ліжко (як у хатах на базарі)
+	for fk in [["room_armchair", "sit"], ["room_sofa", "sit"], ["room_bed", "lie"]]:
+		if props.has(fk[0]):
+			furn_proxy(props[fk[0]][0], fk[1])
 	if not any:
 		var sofa := Util.mat(Color(0.86, 0.78, 0.62), 0.9)
 		room_root.add_child(Util.box(Vector3(2.0, 0.45, 0.8), sofa, Vector3(1.5, 0.22, 1.7)))
@@ -1609,6 +1628,10 @@ func test_moving() -> void:
 	well_draw()
 
 
+var door_backs := {}               # назва дверей → темна заслінка за ними
+var door_holes := {}               # назва дверей → проріз у стіні (у світі)
+
+
 func make_house_door(holder: Node3D, box: AABB, name: String, r := 2.2, ref: Node3D = null, face_x := false, backing := true) -> void:
 	## Вирізає двері з моделі будинку (box — у просторі самого holder), ставить їх на петлю
 	## й реєструє як «двері, що відчиняються, коли хтось підходить».
@@ -1638,6 +1661,137 @@ func make_house_door(holder: Node3D, box: AABB, name: String, r := 2.2, ref: Nod
 	var back := Util.box(Vector3(w * 0.96, h * 0.98, 0.03), Util.mat(Color(0.08, 0.06, 0.05), 1.0),
 		Vector3((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z - 0.04))
 	holder.add_child(back)
+	door_backs[name] = back
+	door_holes[name] = AABB(holder.to_global(lo), hi - lo)
 	var hg := Models.hinge(dm, holder.to_global(Vector3(lo.x, 0, (lo.z + hi.z) / 2.0)))
 	doors[name] = [hg, hg.rotation.y, 1.0]
 	add_auto_door(name, [name], holder.to_global(Vector3((lo.x + hi.x) / 2.0, 0, hi.z + 0.5)), r)
+
+
+# ------------------------------------------------------------------ двері дідової хати: відчинені — видно, що по той бік
+# Кімната стоїть окремо (ROOM), тож у прорізі дверей показуємо те, що бачила б камера по той бік:
+# з подвір'я — кімнату, з кімнати — подвір'я. Двері хати й двері кімнати — одне й те саме місце (portal_shift).
+const PORTAL_LAYER := 1 << 19            # стулки дверей і самі «прорізи» — їх друга камера не бачить
+const ROOM_DOOR := Vector3(-2.0, 0, 2.75)   # проріз дверей кімнати (у системі кімнати), площина передньої стіни
+var portal_shift := Vector3.ZERO         # подвір'я → кімната
+var portal_door := Vector3.ZERO          # проріз дверей хати на подвір'ї (низ, середина)
+var _portal_vp: SubViewport
+var _portal_cam: Camera3D
+var _portal_env: Environment
+var _portal_k := 0.0                     # у кімнаті двері відчинені — світла з подвір'я більше
+
+
+func _make_portal() -> void:
+	if not door_holes.has("house") or not door_backs.has("house") or room_door_light == null or not doors.has("room"):
+		return
+	var hb: AABB = door_holes["house"]
+	portal_door = Vector3(hb.get_center().x, 0, hb.get_center().z)
+	portal_shift = ROOM + ROOM_DOOR - portal_door
+	_portal_vp = SubViewport.new()
+	_portal_vp.name = "DoorView"
+	_portal_vp.size = Vector2i(640, 360)
+	_portal_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_portal_vp.audio_listener_enable_3d = false
+	add_child(_portal_vp)
+	_portal_cam = Camera3D.new()
+	_portal_cam.cull_mask = 0xFFFFF & ~PORTAL_LAYER
+	# тон-маппінг зробить головна камера (картинка з прорізу йде крізь неї ще раз)
+	_portal_env = env.duplicate()
+	_portal_env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	_portal_env.tonemap_exposure = 1.0
+	_portal_cam.environment = _portal_env
+	_portal_vp.add_child(_portal_cam)
+	_portal_cam.current = true
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;
+uniform sampler2D view : source_color, filter_linear;
+void fragment() {
+	ALBEDO = texture(view, SCREEN_UV).rgb;
+}
+"""
+	var pm := ShaderMaterial.new()
+	pm.shader = sh
+	pm.set_shader_parameter("view", _portal_vp.get_texture())
+	var back: MeshInstance3D = door_backs["house"]
+	back.material_override = pm
+	room_door_light.material_override = pm
+	for n in [back, room_door_light, doors["house"][0], doors["room"][0]]:
+		var list: Array = (n as Node).find_children("*", "VisualInstance3D", true, false)
+		if n is VisualInstance3D:
+			list.append(n)
+		for v in list:
+			(v as VisualInstance3D).layers = PORTAL_LAYER
+
+
+func door_open_k(name: String) -> float:
+	## Наскільки відчинені двері: 0 — зачинені, 1 — навстіж.
+	if not doors.has(name):
+		return 0.0
+	var d: Array = doors[name]
+	return clampf(absf(wrapf((d[0] as Node3D).rotation.y - float(d[1]), -PI, PI)) / deg_to_rad(100.0), 0.0, 1.0)
+
+
+func _portal_step(delta: float) -> void:
+	if _portal_vp == null:
+		return
+	var mc := get_viewport().get_camera_3d()
+	var open := maxf(door_open_k("house"), door_open_k("room"))
+	var in_room := mc != null and mc.global_position.z < ROOM.z + 400.0
+	var near := mc != null and (in_room or mc.global_position.distance_to(portal_door) < 40.0)
+	var on := open > 0.02 and near
+	_portal_k = move_toward(_portal_k, open if on and in_room else 0.0, delta * 2.0)
+	if not on:
+		if _portal_vp.render_target_update_mode != SubViewport.UPDATE_DISABLED:
+			_portal_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var want := Vector2i(maxi(64, int(vs.x * 0.6)), maxi(64, int(vs.y * 0.6)))
+	if _portal_vp.size != want:
+		_portal_vp.size = want
+	_portal_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var shift := -portal_shift if in_room else portal_shift
+	_portal_cam.global_transform = Transform3D(mc.global_transform.basis, mc.global_position + shift)
+	_portal_cam.fov = mc.fov
+	_portal_cam.near = mc.near
+	_portal_cam.far = mc.far
+	_portal_cam.keep_aspect = mc.keep_aspect
+	_portal_env.ambient_light_color = env.ambient_light_color
+	_portal_env.ambient_light_energy = env.ambient_light_energy
+	_portal_env.fog_light_color = env.fog_light_color
+
+
+func furn_proxy(holder: Node3D, act: String) -> Area3D:
+	## Невидима копія меблів у метрах (вісь Y — угору) із зоною торкання: Ніка сідає чи лягає, як у хатах на базарі.
+	if holder == null:
+		return null
+	var faces := PackedVector3Array()
+	for mi in holder.find_children("*", "MeshInstance3D", true, false):
+		var m3 := mi as MeshInstance3D
+		if m3.mesh == null:
+			continue
+		var T := Models._rel(m3, holder)
+		for v in m3.mesh.get_faces():
+			faces.append(T * v)
+	if faces.size() < 3:
+		return null
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = faces
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var px := MeshInstance3D.new()
+	px.name = "FurnProxy"
+	px.mesh = am
+	px.layers = 0                        # не малюється жодною камерою
+	px.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	holder.add_child(px)
+	var ab := am.get_aabb()
+	var a := Util.pick_area("bz_furn", ab.size + Vector3(0.12, 0.12, 0.12), ab.get_center())
+	a.set_meta("act", act)
+	a.set_meta("box", ab)
+	if act == "lie":
+		a.set_meta("top_max", 1.0)           # дідове ліжко високе: матрац ~0.95 м (а не 0.72, як на базарі)
+	px.add_child(a)
+	return a

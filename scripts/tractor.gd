@@ -586,7 +586,7 @@ func poke() -> void:
 # ------------------------------------------------------------------ Ніка за кермом (main.gd → start_mount("tractor"))
 func cab_points() -> Dictionary:
 	## Точки для Ніки у системі трактора: де стати, приступка, площадка біля сидіння, сидіння, педалі.
-	return {"climb": CLIMB_FROM, "steps": [STEP], "sill": Vector3(-0.28, 0.66, 0.72), "seat": SEAT_HIPS,
+	return {"climb": CLIMB_FROM, "steps": [STEP], "sill": Vector3(-0.28, 0.66, 0.72), "seat": SEAT_HIPS + Vector3(0.0, 0.07, 0.18),
 		"feet": FEET, "side": -1.0, "hold": FENDER}
 
 

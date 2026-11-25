@@ -27,6 +27,7 @@ func setup(at: Vector3, sp := {}) -> void:
 	model = Models.spawn(self, "drone", 0.6)
 	if model:
 		model.position.y -= 0.3
+		_split_props()
 	add_child(Util.pick_area("drone", Vector3(0.8, 0.6, 0.8), Vector3.ZERO))
 	drops = _particles(Color(0.55, 0.8, 1.0, 0.8), 0.015, 40)
 	grain_fx = _particles(Color(0.95, 0.8, 0.3, 1.0), 0.02, 30)
@@ -34,6 +35,76 @@ func setup(at: Vector3, sp := {}) -> void:
 	bubble.pixel_size = 0.0032
 	bubble.position = Vector3(0, 0.6, 0)
 	add_child(bubble)
+
+
+# ------------------------------------------------------------------ пропелери крутяться
+var _props: Array = []
+var _spin := 0.0
+const HUBS := [Vector2(0.687, 0.679), Vector2(-0.689, 0.678), Vector2(0.688, -0.679), Vector2(-0.686, -0.679)]
+
+
+func _split_props() -> void:
+	## Модель дрона — одна сітка. Вирізаємо з неї чотири пропелери (тонкий шар лопатей над моторами)
+	## в окремі сітки, щоб крутити їх навколо осей моторів.
+	var m: Node3D = model.get_meta("model") if model.has_meta("model") else null
+	if m == null:
+		return
+	var mis := m.find_children("*", "MeshInstance3D", true, false)
+	if mis.is_empty():
+		return
+	var mi := mis[0] as MeshInstance3D
+	var src := mi.mesh as ArrayMesh
+	if src == null or src.get_surface_count() != 1:
+		return
+	var arr := src.surface_get_arrays(0)
+	var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+	if idx.is_empty():
+		return
+	var T := Models._rel(mi, m)
+	var keep := PackedInt32Array()
+	var per := [[], [], [], []]
+	for i in range(0, idx.size() - 2, 3):
+		var a: Vector3 = T * verts[idx[i]]
+		var b: Vector3 = T * verts[idx[i + 1]]
+		var c: Vector3 = T * verts[idx[i + 2]]
+		var which := -1
+		if minf(a.y, minf(b.y, c.y)) > 0.12 and maxf(a.y, maxf(b.y, c.y)) < 0.26:
+			var cen := (a + b + c) / 3.0
+			for h in 4:
+				if Vector2(cen.x - HUBS[h].x, cen.z - HUBS[h].y).length() < 0.45:
+					which = h
+					break
+		if which < 0:
+			keep.append(idx[i])
+			keep.append(idx[i + 1])
+			keep.append(idx[i + 2])
+		else:
+			(per[which] as Array).append_array([idx[i], idx[i + 1], idx[i + 2]])
+	if keep.size() == idx.size():
+		return
+	var mat: Material = mi.get_active_material(0)
+	arr[Mesh.ARRAY_INDEX] = keep
+	var body := ArrayMesh.new()
+	body.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	body.surface_set_material(0, mat)
+	mi.mesh = body
+	for h in 4:
+		if (per[h] as Array).is_empty():
+			continue
+		arr[Mesh.ARRAY_INDEX] = PackedInt32Array(per[h])
+		var pm := ArrayMesh.new()
+		pm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		pm.surface_set_material(0, mat)
+		var hub := Vector3(HUBS[h].x, 0.0, HUBS[h].y)
+		var pivot := Node3D.new()
+		pivot.position = hub
+		m.add_child(pivot)
+		var pmi := MeshInstance3D.new()
+		pmi.mesh = pm
+		pmi.transform = Transform3D(T.basis, T.origin - hub)
+		pivot.add_child(pmi)
+		_props.append(pivot)
 
 
 func _particles(col: Color, r: float, n: int) -> CPUParticles3D:
@@ -71,6 +142,9 @@ func say(text: String, secs := 2.5) -> void:
 func _process(delta: float) -> void:
 	_t += delta
 	rotation.z = sin(_t * 1.3) * 0.05 if mode != "rest" else 0.0
+	_spin = lerpf(_spin, 0.0 if mode == "rest" else 28.0, 1.0 - exp(-delta * 1.5))
+	for i in _props.size():
+		(_props[i] as Node3D).rotation.y += _spin * delta * (1.0 if i == 0 or i == 3 else -1.0)
 	if _bubble_left > 0.0:
 		_bubble_left -= delta
 		if _bubble_left <= 0.0:
