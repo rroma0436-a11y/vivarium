@@ -1390,6 +1390,9 @@ func _make_wheat(rng: RandomNumberGenerator) -> void:
 func _make_wheat_field() -> void:
 	var rng := RandomNumberGenerator.new()         # окремий генератор — решта світу не зсувається
 	rng.seed = 4242
+	if Models.exists("wheat"):
+		_make_wheat_clumps(rng)
+		return
 	var pm := PrismMesh.new()
 	pm.size = Vector3(0.22, 1.0, 0.04)
 	var mat := Util.mat(Color(0.86, 0.7, 0.3), 0.9)
@@ -1429,6 +1432,62 @@ func _make_wheat_field() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.visibility_range_end = 120.0
 		field.add_child(mi)
+		i += 1
+
+
+func _make_wheat_clumps(rng: RandomNumberGenerator) -> void:
+	## Пшениця з моделі wheat.glb (кущі колосся з Meshy): зблизька — детальна, далі — спрощена wheat_lo.
+	var sc: Node = (load(Models.DIR % "wheat") as PackedScene).instantiate()
+	var hi_n := sc.find_child("wheat", true, false) as MeshInstance3D
+	var lo_n := sc.find_child("wheat_lo", true, false) as MeshInstance3D
+	var hi: Mesh = hi_n.mesh if hi_n else null
+	var lo: Mesh = lo_n.mesh if lo_n else hi
+	sc.free()
+	if hi == null:
+		return
+	var field := Node3D.new()
+	field.name = "WheatField"
+	add_child(field)
+	var chunk := 6.0
+	var step := 1.45
+	var buckets := {}
+	var x := WHEAT_N.position.x + step * 0.5
+	while x < WHEAT_N.end.x:
+		var z := WHEAT_N.position.y + step * 0.5
+		while z < WHEAT_N.end.y:
+			var p := Vector3(x + rng.randf_range(-0.4, 0.4), 0, z + rng.randf_range(-0.4, 0.4))
+			var s := rng.randf_range(1.05, 1.3)
+			var ang := rng.randf() * TAU
+			if not _near_forest_road(Vector2(p.x, p.z), 1.8):
+				var key := Vector2i(floori(p.x / chunk), floori(p.z / chunk))
+				if not buckets.has(key):
+					buckets[key] = []
+				buckets[key].append(Transform3D(Basis(Vector3.UP, ang).scaled(Vector3(s, s * rng.randf_range(0.95, 1.15), s)), p))
+			z += step
+		x += step
+	var i := 0
+	for key in buckets:
+		var list: Array = buckets[key]
+		var c := Vector3((key.x + 0.5) * chunk, 0, (key.y + 0.5) * chunk)   # вузол у центрі шматка — від нього рахується дальність
+		for lod in 2:
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.mesh = hi if lod == 0 else lo
+			mm.instance_count = list.size()
+			for j in list.size():
+				var t: Transform3D = list[j]
+				mm.set_instance_transform(j, Transform3D(t.basis, t.origin - c))
+			var mi := MultiMeshInstance3D.new()
+			mi.name = "wheat_%d_%d" % [i, lod]
+			mi.position = c
+			mi.multimesh = mm
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			if lod == 0:
+				mi.visibility_range_end = 22.0
+			else:
+				mi.visibility_range_begin = 22.0
+				mi.visibility_range_end = 140.0
+			field.add_child(mi)
 		i += 1
 
 
