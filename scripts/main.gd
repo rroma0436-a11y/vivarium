@@ -53,7 +53,7 @@ var _shot := ""
 var _demo := ""
 var hero := "girl"
 const HEROES := [["girl", "Ніка", "girl"], ["granny", "Бабуся Галя", "granny"], ["grandpa", "Дідусь Петро", "grandpa"],
-	["shepherd", "Пастух Іван", ""], ["groom", "Конюх Семен", ""], ["kid", "Тарасик", "kid"], ["robot_kid", "Гвинтик", "gvintyk"]]
+	["shepherd", "Пастух Іван", "shepherd"], ["groom", "Конюх Семен", "groom"], ["kid", "Тарасик", "kid"], ["robot_kid", "Гвинтик", "gvintyk"]]
 var _frames := 0
 var _greeted := false
 var _track: Node3D

@@ -342,12 +342,12 @@ static func share_anims(ap: AnimationPlayer, from_id: String, map: Dictionary) -
 		if absf(hs) > 1e-5:
 			k = (tk * _grest(sk, hb)).origin.y / hs
 	var path := String(root.get_path_to(sk))
-	var lib := ap.get_animation_library("")
+	var lib: AnimationLibrary = ap.get_animation_library("nika") if ap.has_animation_library("nika") else AnimationLibrary.new()
 	for role in map:
 		var an := find_anim(sap, [String(map[role])])
 		if an == "":
 			continue
-		var nn := "nika_" + an
+		var nn := an
 		var ck := root.scene_file_path + "|" + nn
 		if not lib.has_animation(nn) and _done.has(ck) and root.scene_file_path != "":
 			lib.add_animation(nn, _done[ck])
@@ -383,5 +383,13 @@ static func share_anims(ap: AnimationPlayer, from_id: String, map: Dictionary) -
 						a.track_set_key_value(t, i, t0 + ft.inverse() * (fs * (v - r0) * k))
 			lib.add_animation(nn, a)
 			_done[ck] = a
-		out[role] = nn
+		out[role] = "nika/" + nn
+	if not ap.has_animation_library("nika") and not out.is_empty():
+		var cur := ap.current_animation
+		var at := ap.current_animation_position if cur != "" else 0.0
+		ap.stop()
+		ap.add_animation_library("nika", lib)
+		if cur != "":
+			ap.play(cur)
+			ap.seek(at, true)
 	return out
