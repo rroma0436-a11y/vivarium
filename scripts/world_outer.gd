@@ -105,6 +105,8 @@ func place_name(p: Vector3) -> String:
 	var al := air_local(p)
 	if al.x < 6.0 and al.x > -85.0 and absf(al.y) < 9.0:
 		return "Аеродром"
+	if p.z < -318.0:
+		return "Грибний ліс"
 	var best := "Луки"
 	var bd := INF
 	for pl in places:
@@ -1714,6 +1716,39 @@ func _ok_tree(p: Vector3) -> bool:
 	return true
 
 
+func _thicken_far_forest(kinds: Array, heights: Dictionary, chunk: float, buckets: Dictionary) -> void:
+	## Грибний ліс за пшеничним полем — густіший. Свій rng, щоб решта лісу стояла як була.
+	var rf := RandomNumberGenerator.new()
+	rf.seed = 4242
+	var cell := 3.0
+	var used := {}
+	for t in trees:
+		if t[1] < -310.0:
+			used[Vector2i(floori(t[0] / cell), floori(t[1] / cell))] = true
+	var added := 0
+	var tries := 0
+	while added < 260 and tries < 4000:
+		tries += 1
+		var p := Vector3(rf.randf_range(-200, 200), 0, rf.randf_range(-470, -320))
+		var k: String = kinds[rf.randi() % kinds.size()]
+		var hr: Array = heights[k]
+		var ang := rf.randf() * TAU
+		var th := rf.randf_range(hr[0], hr[1])
+		if p.length() > LIMIT + 30.0 or not _ok_tree(p) or not Models.exists(k):
+			continue
+		var c := Vector2i(floori(p.x / cell), floori(p.z / cell))
+		if used.has(c):
+			continue
+		used[c] = true
+		var key := "%d_%d_%s" % [floori(p.x / chunk), floori(p.z / chunk), k]
+		if not buckets.has(key):
+			buckets[key] = []
+		buckets[key].append([p, ang, th])
+		trees.append([p.x, p.z])
+		_obst.append([p.x, p.z, 0.5, 6.0])
+		added += 1
+
+
 func _make_forest(rng: RandomNumberGenerator) -> void:
 	var kinds := ["birch_b_lo", "pine_lo", "birch_a_lo", "pine_lo"]
 	var heights := {"birch_b_lo": [7.0, 10.0], "pine_lo": [8.0, 12.0], "birch_a_lo": [6.5, 9.0]}
@@ -1763,6 +1798,7 @@ func _make_forest(rng: RandomNumberGenerator) -> void:
 		trees.append([p.x, p.z])
 		_obst.append([p.x, p.z, 0.5, 6.0])
 		n += 1
+	_thicken_far_forest(kinds, heights, chunk, buckets)
 	# зразок кожного виду: меш і як він стоїть у моделі
 	var proto := {}
 	for k in kinds:
