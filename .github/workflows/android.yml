@@ -101,11 +101,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp build/dyvo-svit-$MODE.apk build/dyvo-svit.apk
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest build/dyvo-svit.apk \
-            --title "Диво-Світ — остання збірка" \
-            --notes "Автоматична збірка з коміту ${GITHUB_SHA::7} ($MODE)." \
-            --target "$GITHUB_SHA" --latest
+          NOTES="Автоматична збірка з коміту ${GITHUB_SHA::7} ($MODE)."
+          for i in 1 2 3 4 5; do
+            if gh release view latest >/dev/null 2>&1; then
+              gh release upload latest build/dyvo-svit.apk --clobber \
+                && gh release edit latest --notes "$NOTES" --target "$GITHUB_SHA" --latest && break
+            else
+              gh release create latest build/dyvo-svit.apk \
+                --title "Диво-Світ — остання збірка" --notes "$NOTES" \
+                --target "$GITHUB_SHA" --latest && break
+            fi
+            echo "спроба $i невдала, повтор"; sleep 8
+          done
+          gh release view latest >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:
