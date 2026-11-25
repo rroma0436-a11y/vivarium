@@ -175,6 +175,7 @@ func _pick_hero() -> void:
 	grid.add_theme_constant_override("v_separation", 18)
 	box.add_child(grid)
 	var picked := [""]
+	_preload_models()
 	for h in list:
 		var b := Button.new()
 		b.text = h[1]
@@ -192,7 +193,35 @@ func _pick_hero() -> void:
 	while picked[0] == "":
 		await get_tree().process_frame
 	hero = picked[0]
+	grid.hide()
+	t.text = "Завантаження…"
+	await get_tree().process_frame
+	await get_tree().process_frame
+	for p in _preload_paths:
+		var r = ResourceLoader.load_threaded_get(p)
+		if r:
+			_preloaded.append(r)
 	cl.queue_free()
+
+
+var _preload_paths: Array = []
+var _preloaded: Array = []
+
+
+func _preload_models() -> void:
+	## Поки гравець обирає героя — моделі вже вантажаться у фонових потоках.
+	var d := DirAccess.open("res://assets/models")
+	if d == null:
+		return
+	for f in d.get_files():
+		var n := f.trim_suffix(".import").trim_suffix(".remap")
+		if not n.ends_with(".glb"):
+			continue
+		var p := "res://assets/models/" + n
+		if p in _preload_paths:
+			continue
+		if ResourceLoader.load_threaded_request(p, "", true) == OK:
+			_preload_paths.append(p)
 
 
 func _spawn_characters() -> void:
@@ -1237,6 +1266,7 @@ func _spawn_cattle() -> void:
 		if id == "horse4" and eh.area:
 			# рудий осідланий — на ньому Ніка їздить верхи
 			eh.area.set_meta("kind", "saddle_horse")
+			eh.no_harness = true
 			eh.voices = ["І-го-го! Сідай, Ніко!", "Пфррр!"]
 			saddle_horse = eh
 			riding_horses.append(eh)
@@ -1651,6 +1681,7 @@ func _show_nika_menu() -> void:
 		"nk_basket_take": not girl.has_basket(), "nk_basket_put": girl.has_basket(),
 		"nk_put": holding, "nk_eat": holding and String(girl.item_kind) in Util.FOOD,
 		"nk_horse": _near_saddle_horse() != null,
+		"nk_jump": hero == "girl",
 	}
 	hud.show_nika_menu(flags)
 

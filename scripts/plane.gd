@@ -29,6 +29,7 @@ var hangar_door: Callable                      # (open: bool) — ворота �
 var model: Node3D
 var prop: Node3D
 var _prop_speed := 0.0
+var _prop_axis := Vector3.RIGHT
 var _vy := 0.0
 var _roll := 0.0
 var _t := 0.0
@@ -110,6 +111,12 @@ func _cut_propeller() -> void:
 	if part == null:
 		return
 	prop = Models.hinge(part, mi.to_global(Vector3(-1.75, 1.05, 0.0)))
+	_prop_axis = (prop.global_transform.basis.inverse() * mi.global_transform.basis.x).normalized()
+	# у моделі за першим пропелером є ще один (нерухомий) — прибираємо його лопаті
+	for sg in [1.0, -1.0]:
+		var extra := Models.cut(model, AABB(Vector3(-1.48, 0.85, 0.36 if sg > 0.0 else -0.9), Vector3(0.27, 0.4, 0.54)), 100.0, mi)
+		if extra:
+			extra.queue_free()
 
 
 func say(t: String, secs := 2.0) -> void:
@@ -223,7 +230,7 @@ func _process(delta: float) -> void:
 	_engine_step()
 	_prop_speed = lerpf(_prop_speed, want_prop, 1.0 - exp(-delta * 1.5))
 	if prop:
-		prop.rotate_object_local(Vector3.RIGHT, _prop_speed * delta)
+		prop.rotate_object_local(_prop_axis, _prop_speed * delta)
 	match state:
 		"ride":
 			_ride(delta)
