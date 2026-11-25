@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, cleanup ]
   workflow_dispatch:
 
 env:
@@ -34,13 +34,6 @@ jobs:
           unzip -q Godot_v${V}-stable_export_templates.tpz -d tpl
           mv tpl/templates/* ~/.local/share/godot/export_templates/${V}.stable/
           rm -f Godot_v${V}-stable_export_templates.tpz
-
-      - name: Розпакувати файли гри (усі zip-архіви)
-        run: |
-          for z in game_files.zip $(ls models_*.zip | sort -V); do
-            if [ -f "$z" ]; then echo "розпаковую $z"; unzip -q -o "$z" -d . ; fi
-          done
-          ls -R scenes scripts assets | head -60
 
       - name: Ключ для підпису
         run: |
@@ -99,6 +92,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/release.keystore"
 
       - name: Опублікувати в Releases (швидке завантаження)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
