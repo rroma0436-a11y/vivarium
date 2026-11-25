@@ -32,6 +32,10 @@ texture={
 "compress/lossy_quality": 0.82,
 "mipmaps/generate": true
 }
+scene={
+"meshes/generate_lods": true,
+"meshes/create_shadow_meshes": true
+}
 
 [input_devices]
 
@@ -42,4 +46,9 @@ pointing/emulate_touch_from_mouse=true
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/size.mobile=2048
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile=2
+mesh_lod/lod_change/threshold_pixels=2.0
 environment/defaults/default_clear_color=Color(0.85, 0.9, 1, 1)

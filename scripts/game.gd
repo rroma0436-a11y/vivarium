@@ -170,6 +170,22 @@ func _ready() -> void:
 	t.autostart = true
 	add_child(t)
 	t.timeout.connect(_tick.bind(0.5))
+	get_tree().node_added.connect(_on_node_added)
+
+
+const LIGHT_NEAR := 22.0             # м: ліхтарі (хати, Beep, світлячки…) світять лише поблизу, далі — вимкнені
+const LIGHT_FADE := 6.0
+
+
+func _on_node_added(n: Node) -> void:
+	## Кожен ліхтар у Compatibility — ще один прохід малювання: далекі вимикаються самі (рушій їх не рахує).
+	if n is OmniLight3D or n is SpotLight3D:
+		var l := n as Light3D
+		if not l.distance_fade_enabled:
+			l.distance_fade_enabled = true
+			l.distance_fade_begin = LIGHT_NEAR
+			l.distance_fade_length = LIGHT_FADE
+			l.distance_fade_shadow = LIGHT_NEAR
 
 
 func default_state() -> Dictionary:

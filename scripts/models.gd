@@ -4,6 +4,7 @@ class_name Models
 ## пошук анімацій. Якщо файлу ще немає — повертає null, і персонаж будує просту заміну сам.
 
 const DIR := "res://assets/models/%s.glb"
+const SMALL_NO_SHADOW := 1.3        # м: модель, менша за це (і без скелета), тіні не кидає
 
 
 static func exists(id: String) -> bool:
@@ -26,8 +27,10 @@ static func spawn(parent: Node3D, id: String, size: float, axis := "y") -> Node3
 	m.scale = Vector3.ONE * s
 	var c := b.get_center()
 	m.position = -Vector3(c.x, b.position.y, c.z) * s
+	# дрібниці (посуд, свічки, товар, дрібні меблі) тіні не кидають — сонцю легше; персонажі — кидають
+	var small := m.find_children("*", "Skeleton3D", true, false).is_empty() and maxf(b.size.x, maxf(b.size.y, b.size.z)) * s < SMALL_NO_SHADOW
 	for mi in m.find_children("*", "MeshInstance3D", true, false):
-		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if small else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	holder.set_meta("model", m)
 	return holder
 
