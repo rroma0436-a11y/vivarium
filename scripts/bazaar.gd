@@ -83,6 +83,11 @@ func build() -> void:
 		var n: Node3D = load(DIR % f).instantiate()
 		n.name = f
 		root.add_child(n)
+		if f == "bz_misc":
+			# лавки з Blender вгрузли в землю й лежали в траві, як дошки — прибрано (лавочки тепер біля хат)
+			for c in n.find_children("Лавка*", "", true, false):
+				c.get_parent().remove_child(c)
+				c.free()
 		if f == "bz_mill":
 			var mn := n.get_node_or_null("Млин") as Node3D
 			if mn:     # на вершині пагорба (замість вітряка), входом до дороги
@@ -101,6 +106,7 @@ func build() -> void:
 	_tack_stall()
 	_make_village_huts()
 	_village_props()
+	_stall_trees()
 	_setup_meshes()
 	_setup_buildings()
 	_collect_roads()
@@ -201,6 +207,7 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 		ap.get_animation(an).loop_mode = Animation.LOOP_LINEAR
 		ap.play(an)
 		ap.seek(randf() * ap.get_animation(an).length, true)
+	Models.give_nika_anims(ap)
 	for mi in m.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var pos := to_world(at.x, at.y)
@@ -928,6 +935,7 @@ func _house_paths(lib: Node, holder: Node3D, inv: Transform3D) -> void:
 	if hs == null:
 		return
 	var grid := _road_grid()
+	var nb := 0
 	for h in hs.get_children():
 		var hn := String(h.name)
 		if not (h is Node3D) or h is MeshInstance3D or not hn.begins_with("Хата") or hn.begins_with("Село_"):
@@ -958,6 +966,53 @@ func _house_paths(lib: Node, holder: Node3D, inv: Transform3D) -> void:
 		_path_piece(lib, holder, inv, pos, bs, kc, inner)
 		_path_piece(lib, holder, inv, pos, bs, inner, corner)
 		_path_piece(lib, holder, inv, pos, bs, corner, porch)
+		# лавочка біля хати: за тином обабіч хвіртки (з того боку, де немає воріт), сидінням до вулиці
+		var lat := Vector3(out_dir.z, 0, -out_dir.x)
+		if kc.dot(lat) > 0.0:
+			lat = -lat
+		var bbs := bs * Basis(Vector3.UP, atan2(out_dir.x, out_dir.z))
+		nb += 1
+		var bench := _vput(lib, holder, inv, "Лавка_спинка" if nb % 2 == 0 else "Лавка", Transform3D(bbs, pos + bs * (kc + out_dir * 0.55 + lat * 2.4)))
+		if bench is MeshInstance3D:
+			var bab := (bench as MeshInstance3D).get_aabb()
+			var ba := Util.pick_area("bz_furn", bab.size + Vector3(0.12, 0.12, 0.12), bab.get_center())
+			ba.set_meta("act", "sit")
+			ba.set_meta("box", bab)
+			ba.set_meta("edge", true)                  # Ніка сідає на край лавочки
+			ba.set_meta("face", bbs * Vector3(0, 0, 1))
+			bench.add_child(ba)
+
+
+func _stall_trees() -> void:
+	## Дерева за ларьками: за кожним рядом ларьків, за 7 м від їхніх задніх стінок.
+	var mn := root.get_node_or_null("bz_misc") as Node3D
+	if mn == null:
+		return
+	var src := mn.find_child("Дерево", false, false) as Node3D
+	if src == null:
+		return
+	var grid := _road_grid()
+	var wo = get_parent()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7707
+	# ряди ларьків у файлі: z = 0 (задні стінки на z = -1.02) і z = 6.32 (задні стінки на z = 7.34), уздовж x від 3.4 до 24.6
+	var k := 0
+	for zr in [-1.02 - 7.0, 6.32 + 1.02 + 7.0]:
+		for x in [4.0, 10.5, 17.0, 23.5]:
+			k += 1
+			var t := src.duplicate() as Node3D
+			t.name = "Дерево_ларьки_%d" % k
+			mn.add_child(t)
+			t.position = Vector3(x + rng.randf_range(-0.6, 0.6), 0, zr)
+			t.rotation = Vector3(0, rng.randf() * TAU, 0)
+			t.scale = Vector3.ONE * rng.randf_range(0.85, 1.05)
+			var gp := t.global_position
+			if _on_bz_road(grid, gp):
+				mn.remove_child(t)
+				t.free()
+				continue
+			if wo and "trees" in wo:                  # стовбур твердий — як і в інших дерев базару (_setup_buildings)
+				wo.trees.append([gp.x, gp.z])
 
 
 func _wall_box(center: Vector3, yaw: float, size: Vector3) -> void:
@@ -1039,7 +1094,15 @@ func _village_props() -> void:
 			if leaf:
 				_add_door(leaf, h, true)
 		var bxl := gx + (2.6 if gx <= 0.0 else -2.6)
-		_vput(lib, holder, inv, "Лавка_спинка" if k % 2 == 0 else "Лавка", Transform3D(bs, pos + bs * Vector3(bxl, 0, zf + 0.55)))
+		var bench := _vput(lib, holder, inv, "Лавка_спинка" if k % 2 == 0 else "Лавка", Transform3D(bs, pos + bs * Vector3(bxl, 0, zf + 0.55)))
+		if bench is MeshInstance3D:
+			var bab := (bench as MeshInstance3D).get_aabb()
+			var ba := Util.pick_area("bz_furn", bab.size + Vector3(0.12, 0.12, 0.12), bab.get_center())
+			ba.set_meta("act", "sit")
+			ba.set_meta("box", bab)
+			ba.set_meta("edge", true)
+			ba.set_meta("face", bs * Vector3(0, 0, 1))
+			bench.add_child(ba)
 		# стежки (шматок «Стежка_10м» — 10 м уздовж своєї осі z)
 		var path := func(p0: Vector3, p1: Vector3) -> void:
 			_path_piece(lib, holder, inv, pos, bs, p0, p1)

@@ -47,6 +47,7 @@ func setup_granny(sp: Dictionary) -> void:
 		 "Борщ уже варю, а ти вже їла?", "Дідусь знову в майстерні? Кличте обідати!", "Онучку, візьми пиріжка!",
 		 "Зранку подою Зірку — буде парне молочко.", "Без дійниці на пасовисько не ходжу!"],
 		[], "granny")
+	Models.give_nika_anims(ap, anims)
 	bounds = YARD_BOUNDS
 	setup_pose()
 	_make_tools()

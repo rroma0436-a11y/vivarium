@@ -39,6 +39,7 @@ func _ready() -> void:
 		add_child(Util.capsule(0.25, 1.5, Util.mat(Color(0.95, 0.95, 0.92)), Vector3(0, 0.85, 0)))
 		add_child(Util.sphere(0.17, Util.mat(Color(0.95, 0.78, 0.65)), Vector3(0, 1.62, 0)))
 	else:
+		Models.give_nika_anims(ap, anims)
 		setup_pose()
 		var sks := model.find_children("*", "Skeleton3D", true, false)
 		if sks.size() > 0:
@@ -55,7 +56,7 @@ func setup_seats() -> void:
 		"bench": [Vector3(4.35, 0, -6.35), 0.0, false, null, -0.04],
 		"table": [Vector3(5.0, 0, 1.12), 0.0, false, _jug("jug"), 0.07],
 		"rocking": [Vector3(2.3, 0, -6.15), deg_to_rad(10.0), false, null, 0.0],
-		"armchair": [R + Vector3(-1.37, 0, 0.79), deg_to_rad(130.0), true, _jug("room_jug"), 0.16],
+		"armchair": [R + Vector3(-2.79, 0, -0.2), deg_to_rad(90.0), true, _jug("room_jug"), 0.16],
 	}
 	_make_blanket()
 

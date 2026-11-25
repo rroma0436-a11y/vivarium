@@ -51,6 +51,9 @@ var bowl: Node3D
 var kibble: Node3D
 var _shot := ""
 var _demo := ""
+var hero := "girl"
+const HEROES := [["girl", "Ніка", "girl"], ["granny", "Бабуся Галя", "granny"], ["grandpa", "Дідусь Петро", "grandpa"],
+	["shepherd", "Пастух Іван", ""], ["groom", "Конюх Семен", ""], ["kid", "Тарасик", "kid"], ["robot_kid", "Гвинтик", "gvintyk"]]
 var _frames := 0
 var _greeted := false
 var _track: Node3D
@@ -65,6 +68,17 @@ func _ready() -> void:
 			_demo = a.substr(7)
 		elif a.begins_with("--time="):
 			Game.state["time"] = float(a.substr(7))
+	if _shot == "" and _demo == "":
+		var fl := [is_processing(), is_physics_processing(), is_processing_input(), is_processing_unhandled_input()]
+		set_process(false)
+		set_physics_process(false)
+		set_process_input(false)
+		set_process_unhandled_input(false)
+		await _pick_hero()
+		set_process(fl[0])
+		set_physics_process(fl[1])
+		set_process_input(fl[2])
+		set_process_unhandled_input(fl[3])
 	world = preload("res://scripts/world.gd").new()
 	add_child(world)
 	audio = preload("res://scripts/audio.gd").new()
@@ -130,6 +144,57 @@ func _ready() -> void:
 		start_girl_control(true)              # Ніка — головна героїня: граємо нею одразу
 
 
+func _pick_hero() -> void:
+	var list := []
+	for h in HEROES:
+		if Models.exists(h[0]):
+			list.append(h)
+	if list.size() < 2:
+		return
+	var cl := CanvasLayer.new()
+	cl.layer = 100
+	add_child(cl)
+	var bg := ColorRect.new()
+	bg.color = Color(0.16, 0.22, 0.14)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(bg)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 28)
+	bg.add_child(box)
+	var t := Label.new()
+	t.text = "Ким будеш грати?"
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.add_theme_font_size_override("font_size", 52)
+	box.add_child(t)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 18)
+	box.add_child(grid)
+	var picked := [""]
+	for h in list:
+		var b := Button.new()
+		b.text = h[1]
+		b.custom_minimum_size = Vector2(230, 230)
+		b.add_theme_font_size_override("font_size", 28)
+		var ic := "res://assets/ui/%s.png" % h[2]
+		if h[2] != "" and ResourceLoader.exists(ic):
+			b.icon = load(ic)
+			b.expand_icon = true
+			b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		var id: String = h[0]
+		b.pressed.connect(func(): picked[0] = id)
+		grid.add_child(b)
+	while picked[0] == "":
+		await get_tree().process_frame
+	hero = picked[0]
+	cl.queue_free()
+
+
 func _spawn_characters() -> void:
 	var sp: Dictionary = world.spots
 	# миска з кормом (корм — купка гранул, яка зменшується, поки Бім їсть)
@@ -185,6 +250,7 @@ func _spawn_characters() -> void:
 			["idle", "walk", "run"],
 			["Привіт! Я Тарасик, живу через дорогу.", "А Бім уміє приносити м'ячик?", "Я ношу воду з криниці — я сильний!", "Дідусь каже, що гарбузи вже майже великі!", "Хочеш, покажу, де жаби в ставку?"],
 			[Vector3(-2.5, 0, 2.5), Vector3(-2.0, 0, 3.0), Vector3(1.5, 0, 0.5), Vector3(-6.0, 0, -1.0), Vector3(-10.0, 0, -4.0), Vector3(-12.0, 0, -7.5)], "npc")
+		Models.give_nika_anims(kid.ap, kid.anims)
 		kid.setup_pose()
 		kid.make_bucket()
 		_lives_outside(kid)
@@ -197,6 +263,7 @@ func _spawn_characters() -> void:
 			["idle", "walk", "run", "dance"],
 			["Біп! Я Гвинтик — молодший помічник.", "Зарядився на 100%!", "Можна я потанцюю? Біп-біп!", "Я ношу дрова й збираю яйця!"],
 			[Vector3(5.6, 0, -2.6), Vector3(4.0, 0, 0.5), Vector3(6.5, 0, -6.0), Vector3(2.5, 0, -3.5), Vector3(-13.0, 0, -2.0), Vector3(-15.0, 0, -7.5)], "npc")
+		Models.give_nika_anims(gvintyk.ap, gvintyk.anims)
 		gvintyk.setup_pose()
 		gvintyk.make_props()
 		_lives_outside(gvintyk)
@@ -248,6 +315,11 @@ func _spawn_characters() -> void:
 		world.yard_root.add_child(girl)
 		girl.position = girl.HOME_YARD
 		girl.setup_girl()
+		var twin = {"granny": granny, "grandpa": grandpa, "groom": groom, "shepherd": shepherd,
+			"kid": kid, "robot_kid": gvintyk}.get(hero)
+		if twin:
+			twin.hide()
+			twin.process_mode = Node.PROCESS_MODE_DISABLED
 	_spawn_forest_hares()
 	seeds = preload("res://scripts/seeds.gd").new()
 	world.yard_root.add_child(seeds)
@@ -1705,6 +1777,9 @@ func _girl_cam(delta: float) -> void:
 	if _mount_state != "":
 		_mount_cam(delta)
 		return
+	if _threshold:
+		_girl_follow(delta, null, false)          # переступає поріг дідової хати сама
+		return
 	var j: Vector2 = hud.flight.joy
 	var run: bool = hud.flight.climb > 0.0
 	var yr := deg_to_rad(rig.yaw)
@@ -1762,6 +1837,14 @@ func _girl_cam(delta: float) -> void:
 	var moved: float = girl.player_step(mv, run, delta)
 	if Game.state["location"] == "room":
 		_room_keep_in()
+	elif not _door_busy and mv.length() > 0.3 and _girl_goal == Vector3.INF and world.portal_shift != Vector3.ZERO:
+		# дійшла до відчинених дверей дідової хати й іде далі — заходить сама, як у хати на базарі
+		var dsp: Vector3 = world.spots["door"]
+		var gq: Vector3 = girl.global_position
+		if absf(gq.x - dsp.x) < 0.6 and gq.z < dsp.z + 0.5 and gq.z > dsp.z - 1.0 and mv.normalized().z < -0.6 \
+				and world.door_open_k("house") > 0.6:
+			_nika_enter_house()
+			return
 	if _girl_goal != Vector3.INF:
 		_detour_update(moved, delta)
 		if moved < 0.25 * delta:
@@ -1934,6 +2017,14 @@ func _seat_plan(area: Area3D, from: Vector3, b) -> Dictionary:
 			else:
 				sp.x = lerpf(ab.position.x, ab.end.x, seat_t)
 			pew_face = xf.basis * (ax * signf(seat_t - back_t))       # спиною до спинки
+	if area.has_meta("edge"):
+		var cc := ab.get_center()
+		if long_x:
+			sp.x = ab.position.x + 0.4 if lc.x < cc.x else ab.end.x - 0.4
+		else:
+			sp.z = ab.position.z + 0.4 if lc.z < cc.z else ab.end.z - 0.4
+	if area.has_meta("seat"):
+		sp = area.get_meta("seat")
 	var seat_c: Vector3 = xf * sp
 	var seat_y := -INF
 	for o in [Vector3.ZERO, Vector3(0.09, 0, 0), Vector3(-0.09, 0, 0), Vector3(0, 0, 0.09), Vector3(0, 0, -0.09)]:
@@ -1953,6 +2044,8 @@ func _seat_plan(area: Area3D, from: Vector3, b) -> Dictionary:
 		face = ax * signf(ax.dot(look - seat_c) + 0.0001)
 	if b and b["kind"] == "church" and backrest == Vector3.INF:
 		face = (b["node"] as Node3D).global_transform.basis * Vector3(0, 0, -1)    # на лаві в церкві — обличчям до іконостасу
+	if area.has_meta("face"):
+		face = area.get_meta("face")
 	if pew_face != Vector3.ZERO:
 		face = pew_face
 	var f := Vector3(face.x, 0, face.z)
@@ -1961,7 +2054,7 @@ func _seat_plan(area: Area3D, from: Vector3, b) -> Dictionary:
 	var lf := xf.basis.orthonormalized().inverse() * f
 	var depth := absf(lf.x) * ab.size.x * xf.basis.x.length() + absf(lf.z) * ab.size.z * xf.basis.z.length()
 	depth = minf(depth, 0.6) if ab.size.x <= 0.8 or ab.size.z <= 0.8 else 0.4
-	if pew_face == Vector3.ZERO:
+	if pew_face == Vector3.ZERO and not area.has_meta("seat"):
 		seat_c += f * maxf(depth * 0.5 - 0.1, 0.03)
 	# звідки підійти: перед сидінням, а коли попереду стіл — збоку, з того боку, де Ніка
 	var side := Vector3(f.z, 0, -f.x)
@@ -2044,12 +2137,14 @@ func _act_start() -> void:
 			var wlen := halfw * xf.basis.get_scale().x
 			var side := cc + w * maxf(0.12, wlen - 0.16) - u * 0.1
 			var root := head + u * 0.98                       # голова — на краю подушки, а не в ній
-			for i in 5:
-				var q := head.lerp(root, 0.2 + 0.2 * i)
+			for i in 4:
+				var q := head.lerp(root, 0.55 + 0.15 * i)    # тулуб і ноги — без подушок, щоб не висіла над ліжком
 				top = maxf(top, _mesh_top_at(mis, q, ymax))   # лягає поверх ковдри, а не в неї
-			top = minf(top, (xf * ab.position).y + 0.72)    # не вище матраца (піч чи стеля поруч — не «постіль»)
-			root.y = top + 0.14
-			extra = {"top_y": top, "side": side, "out_yaw": atan2(w.x, w.z), "lie_yaw": atan2(u.x, u.z), "root": root}
+			top = minf(top, (xf * ab.position).y + float(area.get_meta("top_max", 0.72)))    # не вище матраца (піч чи стеля поруч — не «постіль»)
+			root.y = top + 0.1
+			var pil := _mesh_top_at(mis, head.lerp(root, 0.12), ymax)
+			var hl := clampf(atan2(pil - top - 0.04, 0.45), 0.0, 0.6) if pil != -INF else 0.0   # голова й плечі — на подушці
+			extra = {"top_y": top, "side": side, "out_yaw": atan2(w.x, w.z), "lie_yaw": atan2(u.x, u.z), "root": root, "head_lean": hl}
 			face = w
 	face.y = 0.0
 	_acting = String(f["act"])
@@ -2253,16 +2348,45 @@ func _nika_put(p: Vector3, yaw: float) -> void:
 	rig.yaw_center = rig.yaw
 
 
+var _threshold := false            # Ніка саме переступає поріг дідової хати (іде сама, без джойстика)
+
+
+func _nika_stride(to: Vector3, secs: float) -> void:
+	## Ніка рівно йде до точки (крізь двері хати).
+	girl.play("walk")
+	var tw := create_tween()
+	tw.tween_property(girl, "global_position", to, maxf(secs, girl.global_position.distance_to(to) / 1.6))
+	await tw.finished
+	girl.play("idle")
+
+
 func _nika_enter_house() -> void:
 	if _door_busy or Game.state["location"] == "room":
 		return
 	_door_busy = true
 	var sp: Dictionary = world.spots
 	girl.rotation.y = PI                            # обличчям до дверей
-	_door_fire = -1.0
-	_door_left = girl.open_door_hand(sp["door"])     # сама тягне за ручку
-	world.set_door("house", true)
-	await get_tree().create_timer(0.6).timeout
+	if world.door_open_k("house") < 0.6:
+		_door_fire = -1.0
+		_door_left = girl.open_door_hand(sp["door"])     # сама тягне за ручку
+		world.set_door("house", true)
+		await get_tree().create_timer(0.6).timeout
+	if world.portal_shift != Vector3.ZERO:
+		# крізь відчинені двері видно кімнату — Ніка заходить, і з того боку вона вже в кімнаті
+		var pd: Vector3 = world.portal_door
+		_threshold = true
+		girl.rotation.y = PI
+		await _nika_stride(Vector3(pd.x, girl.global_position.y, pd.z - 0.3), 0.6)
+		go_to("room", false, true)
+		world.set_door("room", true, 0.05)
+		world.set_door("house", false, 0.3)
+		_nika_put(girl.global_position + world.portal_shift, PI)
+		rig.setup(girl.global_position + Vector3(0, 0.8, 0), rig.yaw, -20.0, 2.0, 1.1, 2.6, 400.0, -70.0, 25.0)
+		await _nika_stride(girl.global_position + Vector3(0, 0, -1.1), 0.9)
+		_threshold = false
+		world.set_door("room", false)
+		_door_busy = false
+		return
 	go_to("room", false, true)
 	world.set_door("house", false, 0.3)
 	var rd: Vector3 = sp["room_door"]
@@ -2284,6 +2408,23 @@ func _nika_house_leave() -> void:
 	var sp: Dictionary = world.spots
 	world.set_door("room", true)
 	await get_tree().create_timer(0.5).timeout
+	if world.portal_shift != Vector3.ZERO:
+		# крізь відчинені двері видно подвір'я — Ніка виходить, і з того боку вона вже надворі
+		var rp: Vector3 = world.portal_door + world.portal_shift
+		_threshold = true
+		girl.rotation.y = 0.0
+		await _nika_stride(Vector3(rp.x, girl.global_position.y, rp.z + 0.3), 0.6)
+		go_to("yard", false, true)
+		world.set_door("house", true, 0.05)
+		world.set_door("room", false, 0.3)
+		_nika_put(girl.global_position - world.portal_shift, 0.0)
+		rig.setup(girl.global_position + Vector3(0, 1.1, 0), 180.0, -20.0, 5.0, 3.0, 26.0)
+		var dout: Vector3 = sp["door"]
+		await _nika_stride(Vector3(dout.x, girl.global_position.y, dout.z + 0.9), 0.9)
+		_threshold = false
+		world.set_door("house", false)
+		_door_busy = false
+		return
 	go_to("yard", false, true)
 	world.set_door("room", false, 0.3)
 	var door: Vector3 = sp["door"]

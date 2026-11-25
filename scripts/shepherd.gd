@@ -15,6 +15,7 @@ func setup_shepherd(cow_door: Vector3, past: Rect2, home: Vector3, route: Array)
 		["Я — Іван, пасу худобу з-змалечку.", "Зірка сьогодні норовлива, а Ласка — тиха.", "Трава цього року соковита!",
 		 "Бичок у нас сильний — не підходь ззаду.", "Ввечері заганяю їх у корівник."],
 		[], "npc")
+	Models.give_nika_anims(ap, anims)
 	make_idle_from("walk")
 	setup_pose()
 	bounds = Rect2(-200.0, -62.0, 270.0, 160.0)      # до ферми за ставком

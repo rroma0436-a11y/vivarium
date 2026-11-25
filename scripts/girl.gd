@@ -22,7 +22,7 @@ const SQUARE := [Vector3(-4.5, 0, 55.5), Vector3(4.5, 0, 55.0), Vector3(-5.0, 0,
 
 
 func setup_girl(_unused = null) -> void:
-	setup("girl", 1.0, {"idle": ["idle_15", "idle"], "walk": ["walking"], "run": ["running"], "skip": ["skip"],
+	setup(main.hero, {"granny": 1.6, "grandpa": 1.72, "shepherd": 1.7, "groom": 1.78, "kid": 1.15, "robot_kid": 0.9}.get(main.hero, 1.0), {"idle": ["idle_15", "idle"], "walk": ["walking"], "run": ["running"], "skip": ["skip"],
 			"talk": ["talk"], "jump": ["happy_jump", "jump"], "sit": ["sit_cross"], "stand": ["sit_to_stand"],
 			"pick": ["female_bend_over_pick_up", "pick_up"], "crouch_pick": ["crouch_pick"], "tree_pick": ["stand_pick_fruit"],
 			"pocket": ["put_in_pocket"], "wag": ["finger_wag"], "drink": ["stand_and_drink"], "turn": ["idle_turn"],
@@ -38,6 +38,8 @@ func setup_girl(_unused = null) -> void:
 	extra_obs = Obstacles.outer
 	walk_speed = 0.95
 	run_speed = 2.2
+	if main.hero != "girl":
+		Models.give_nika_anims(ap, anims)
 	_make_idle()
 	setup_pose()
 
@@ -276,7 +278,7 @@ func _lie_apply(T: float) -> void:
 		rotation = Vector3(-PI / 2.0 * kt, lerp_angle(out_yaw, lie_yaw, ky), 0)
 		if pose:
 			pose.sit = 1.0 - kt
-			pose.lean = -0.15 * sin(kt * PI)
+			pose.lean = -0.15 * sin(kt * PI) + float(L.get("head_lean", 0.0)) * kt
 			var hw := 1.0 - kt
 			var bk := Vector3(sin(rotation.y), 0, cos(rotation.y))
 			var sd := bk.cross(Vector3.UP)
@@ -352,6 +354,7 @@ func player_end() -> void:
 	if acting != "":
 		act_end(true)
 	player = false
+	_swim_reset()
 	var bz0 = main.world.outer.bazaar if main else null
 	if bz0 == null or bz0.building_at(global_position) == null:
 		global_position.y = Util.hill_y(global_position)
@@ -362,6 +365,115 @@ func player_end() -> void:
 
 
 const FAR_ALL := Rect2(-80.0, -135.0, 150.0, 380.0)
+
+# ------------------------------------------------------------------ вода: заходить у річку й ставок, плаває
+var swim_w := 0.0                      # 0 — на суші (чи бреде), 1 — пливе
+var _swim_on := false
+var _swim_mv := 0.0                    # 0 — тримається на воді, 1 — пливе брасом
+var _swim_ph := 0.0                    # фаза гребка
+var _swim_pitch := 0.0
+var _model0 := Transform3D()
+var _swim_hip := Vector3.ZERO          # стегна у системі Ніки (коли стоїть)
+var _swim_head := 0.5                  # від стегон до голови (м)
+const WATER_Y := 0.05                  # поверхня води
+const SWIM_IN := 0.95                  # глибше — пливе
+const SWIM_OUT := 0.8                  # мілкіше — знову йде по дну
+
+
+func _water_d(p: Vector3) -> float:
+	var wo = main.world.outer if main else null
+	if wo == null or not wo.has_method("water_depth") or Util.bridge_y(p) > 0.05:
+		return 0.0
+	return maxf(wo.water_depth(p), 0.0)
+
+
+func _swim_begin() -> void:
+	_model0 = model.transform
+	var hw := hips_world()
+	var s := maxf(global_transform.basis.get_scale().y, 0.001)
+	_swim_hip = Vector3(0, (hw.y - global_position.y) / s, 0)
+	_swim_head = 0.5
+	var hb: int = pose._b.get("Head", -1) if pose else -1
+	var hp: int = pose._b.get("Hips", -1) if pose else -1
+	if _sk_cache and hb >= 0 and hp >= 0:
+		var xf := _sk_cache.global_transform
+		_swim_head = maxf(0.25, (xf * _sk_cache.get_bone_global_rest(hb).origin).distance_to(xf * _sk_cache.get_bone_global_rest(hp).origin))
+		_swim_hip.y = ((xf * _sk_cache.get_bone_global_rest(hp).origin).y - global_position.y) / s
+
+
+func _swim_reset() -> void:
+	if swim_w > 0.0 and model:
+		model.transform = _model0
+	swim_w = 0.0
+	_swim_on = false
+	_swim_mv = 0.0
+	if pose:
+		pose.swim = 0.0
+
+
+func _swim_step(wd: float, amt: float, delta: float) -> void:
+	## Глибше SWIM_IN — лягає на воду й пливе брасом (руки гребуть, ноги штовхаються), на місці — тримається на воді.
+	if not _swim_on and wd > SWIM_IN:
+		_swim_on = true
+	elif _swim_on and wd < SWIM_OUT:
+		_swim_on = false
+	if swim_w <= 0.0:
+		if not _swim_on:
+			return
+		_swim_begin()
+	swim_w = move_toward(swim_w, 1.0 if _swim_on else 0.0, delta * 1.6)
+	_swim_mv = move_toward(_swim_mv, 1.0 if amt > 0.08 and _swim_on else 0.0, delta * 1.5)
+	var ph0 := _swim_ph
+	_swim_ph = fposmod(_swim_ph + delta * lerpf(0.5, 0.7 + 0.35 * amt, _swim_mv), 1.0)
+	if swim_w > 0.5 and ph0 < 0.6 and _swim_ph >= 0.6:
+		_ripple(lerpf(0.25, 0.5, _swim_mv))
+	# у ковзанні після поштовху тіло лягає рівніше, під час гребка — трохи підіймається
+	var glide := smoothstep(0.86, 1.0, _swim_ph) + (1.0 - smoothstep(0.0, 0.3, _swim_ph))
+	_swim_pitch = swim_w * (lerpf(0.4, 1.0, _swim_mv) + 0.12 * _swim_mv * (glide - 0.5))
+	var r := Basis(Vector3.RIGHT, _swim_pitch)
+	model.transform = Transform3D(r, _swim_hip - r * _swim_hip) * _model0
+	if pose:
+		pose.swim = swim_w
+		pose.swim_move = _swim_mv
+		pose.swim_ph = _swim_ph
+		pose.body_node = model
+		pose.life = 0.0
+	if swim_w <= 0.0:
+		_swim_reset()
+
+
+func _swim_y() -> float:
+	## Де стати Ніці (y), щоб стегна були під водою, а голова — над нею.
+	var s := maxf(global_transform.basis.get_scale().y, 0.001)
+	var bob := sin(_swim_ph * TAU - 1.6) * 0.04 * _swim_mv          # гребе руками — підіймається, ковзає — опускається
+	var hip_y := WATER_Y - lerpf(0.45, 0.17, _swim_mv) + bob
+	hip_y = maxf(hip_y, WATER_Y + 0.12 - _swim_head * cos(_swim_pitch))
+	return hip_y - _swim_hip.y * s
+
+
+func _ripple(alpha: float) -> void:
+	## Кола на воді від гребка.
+	var r := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.26
+	tm.outer_radius = 0.32
+	tm.rings = 32
+	tm.ring_segments = 4
+	r.mesh = tm
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.95, 0.98, 1.0, alpha)
+	r.material_override = m
+	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	get_parent().add_child(r)
+	var f := global_transform.basis.z.normalized()
+	r.global_position = Vector3(global_position.x, WATER_Y + 0.03, global_position.z) + Vector3(f.x, 0, f.z) * 0.35
+	r.scale = Vector3(1.0, 0.12, 1.0)
+	var tw := r.create_tween().set_parallel()
+	tw.tween_property(r, "scale", Vector3(4.0, 0.12, 4.0), 1.6).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.6)
+	tw.chain().tween_callback(r.queue_free)
 
 
 func player_step(mv: Vector3, run: bool, delta: float) -> float:
@@ -375,6 +487,11 @@ func player_step(mv: Vector3, run: bool, delta: float) -> float:
 	if amt > 0.08:
 		var dir := mv / mv.length()
 		var spd := (PL_RUN if run else PL_WALK) * (amt if not run else 1.0)
+		var wd0 := _water_d(old)
+		if _swim_on:
+			spd = (1.3 if run else 0.85) * (amt if not run else 1.0)      # пливе
+		elif wd0 > 0.0:
+			spd *= lerpf(1.0, 0.45, clampf(wd0 / SWIM_IN, 0.0, 1.0))      # бреде у воді
 		_pl_body.global_position = Vector3(old.x, _pl_y, old.z)
 		_pl_body.velocity = dir * spd
 		_pl_body.move_and_slide()
@@ -388,16 +505,21 @@ func player_step(mv: Vector3, run: bool, delta: float) -> float:
 			return Vector2(p.x - old.x, p.z - old.z).length()
 		# причал на ставку: з берега — на настил, а з настилу у воду не ступає
 		var on_pier := Util.on_pier(p) or Util.on_pier(old)
+		if wd0 > 0.3 and Util.on_pier(p, 0.3):
+			p = Vector3(old.x, p.y, old.z)       # з води на високий настил причалу не вилазить
+			on_pier = false
 		if on_pier:
 			p = Util.pier_clamp(p)
 		# у відкритому світі — ті самі перешкоди, що й для всіх (хати, дерева, криниця…)
 		if (bz == null or not bz.in_area(p)) and not (on_pier and Util.on_pier(p)):
-			p = Obstacles.push_out(p, me_r, 0.0, _obs())
-		# річка: перейти можна лише мостом
+			p = Obstacles.push_out(p, me_r, 0.105, _obs())     # ставок (перешкоди висотою 0.1) — можна зайти у воду
+		# міст: поручні з обох боків — ні з настилу у воду, ні з води на настил крізь них
 		var rz: float = main.world.outer.RIVER_Z
-		if absf(p.z - rz) < 5.0 and absf(p.x) > 2.0:
-			p.z = old.z if absf(old.z - rz) >= 5.0 else p.z
-			p.x = clampf(p.x, -2.0, 2.0) if absf(old.z - rz) < 5.0 else p.x
+		if absf(p.z - rz) <= 6.0:
+			if absf(old.x) <= 1.6 and absf(old.z - rz) <= 7.8:
+				p.x = clampf(p.x, -1.35, 1.35)
+			elif absf(p.x) < 1.85:
+				p.x = 1.85 * (signf(old.x) if old.x != 0.0 else 1.0)
 		# тин подвір'я: у двір і з двору — тільки через ворота
 		var was_in := YARD_R.has_point(Vector2(old.x, old.z))
 		var now_in := YARD_R.has_point(Vector2(p.x, p.z))
@@ -414,7 +536,7 @@ func player_step(mv: Vector3, run: bool, delta: float) -> float:
 		global_position = Vector3(p.x, global_position.y, p.z)
 		# уперлася в паркан чи тин і далі тисне джойстиком — перелазить
 		var mv_now := Vector2(p.x - old.x, p.z - old.z).length()
-		if amt > 0.6 and mv_now < spd * delta * 0.3:
+		if amt > 0.6 and mv_now < spd * delta * 0.3 and swim_w <= 0.0:
 			_push_t += delta
 			if _push_t > 0.35:
 				_push_t = 0.0
@@ -423,8 +545,10 @@ func player_step(mv: Vector3, run: bool, delta: float) -> float:
 		else:
 			_push_t = 0.0
 		var want := atan2(dir.x, dir.z)
-		rotation.y = lerp_angle(rotation.y, want, 1.0 - exp(-delta * 12.0))
-		if run:
+		rotation.y = lerp_angle(rotation.y, want, 1.0 - exp(-delta * (5.0 if _swim_on else 12.0)))
+		if _swim_on:
+			play("idle")
+		elif run:
 			play("run", 1.05)
 		else:
 			play("walk", clampf(spd / 1.05, 0.7, 1.7))
@@ -439,10 +563,14 @@ func player_step(mv: Vector3, run: bool, delta: float) -> float:
 	if bz and bz.in_area(global_position):
 		fy = bz.floor_y(global_position, _pl_y)
 	fy = maxf(fy, Util.bridge_y(global_position) + 0.04)    # міст, пагорб; дороги й стежки трохи над землею — ноги не вгрузають
+	var wd := _water_d(global_position)
+	_swim_step(wd, amt, delta)
+	if wd > 0.0 and fy < 0.1:
+		fy = lerpf(-wd + 0.02, _swim_y(), swim_w)              # бреде по дну — або пливе
 	_pl_y = lerpf(_pl_y, fy, 1.0 - exp(-delta * 14.0)) if absf(_pl_y - fy) < 0.6 else fy
 	global_position.y = _pl_y
 	if pose:
-		pose.life = lerpf(pose.life, 0.0 if amt > 0.08 else 1.0, 1.0 - exp(-delta * 3.0))
+		pose.life = lerpf(pose.life, 0.0 if amt > 0.08 or swim_w > 0.0 else 1.0, 1.0 - exp(-delta * 3.0))
 	var moved := Vector2(global_position.x - old.x, global_position.z - old.z).length()
 	return moved
 
@@ -1078,6 +1206,8 @@ func _play_keys(t: Node3D, keys: Array) -> void:
 		var p3: Vector3 = keys[mini(i + 2, keys.size() - 1)]["hips"]
 		var hp: Vector3 = (a["hips"] as Vector3).cubic_interpolate(b["hips"], p0, p3, sm)
 		rotation.y = t.global_rotation.y + lerp_angle(float(a["yaw"]), float(b["yaw"]), sm)
+		if t.has_method("set_tilt"):
+			t.set_tilt(lerpf(float(a.get("tilt", 0.0)), float(b.get("tilt", 0.0)), sm))
 		if pose:
 			pose.lean = lerpf(float(a.get("lean", 0.0)), float(b.get("lean", 0.0)), sm)
 			var ik := {}
@@ -1098,6 +1228,8 @@ func _play_keys(t: Node3D, keys: Array) -> void:
 			pose.ik = ik
 		place_hips(t.to_global(hp))
 		await get_tree().process_frame
+	if _keys_abort and is_instance_valid(t) and t.has_method("set_tilt"):
+		t.set_tilt(0.0)
 
 
 func _ride_prep(t: Node3D, kind: String) -> void:
@@ -1225,8 +1357,10 @@ func _bike_ik() -> Dictionary:
 
 
 func mount_bike(b: Node3D) -> void:
-	## Сідає на велосипед: стає зліва, бере кермо, переносить праву ногу через багажник,
-	## стає над рамою, сідає на сідло й ставить ноги на педалі.
+	## Сідає на велосипед, як справжня дитина: стає зліва біля сідла, бере кермо обома руками,
+	## нахиляє велосипед до себе, відводить праву ногу назад і перекидає її через сідло,
+	## стає над рамою, вирівнює велосипед, ставить праву ногу на педаль, відштовхується
+	## лівою, сідає на сідло й ставить ліву ногу на другу педаль.
 	_ride_prep(b, "bike")
 	var G := b.to_local(global_position)
 	var hs := 0.69
@@ -1235,15 +1369,35 @@ func mount_bike(b: Node3D) -> void:
 	var keys := [
 		{"t": 0.0, "hips": Vector3(G.x, hs, G.z), "yaw": 0.0,
 			"ik": {"LeftFoot": [Vector3(G.x + 0.06, ank, G.z), 1.0], "RightFoot": [Vector3(G.x - 0.06, ank, G.z), 1.0]}},
-		{"t": 0.35, "hips": Vector3(0.42, hs, -0.05), "yaw": 0.0,
-			"ik": {"LeftFoot": [Vector3(0.48, ank, -0.03), 1.0], "RightFoot": [Vector3(0.36, ank, -0.07), 1.0]}},
-		{"t": 0.8, "hips": Vector3(0.38, hs - 0.03, -0.07), "yaw": 0.0, "lean": 0.35,
-			"ik": {"LeftFoot": [Vector3(0.48, ank, -0.03), 1.0], "RightFoot": [Vector3(0.36, ank, -0.07), 1.0]}.merged(hands)},
-		{"t": 1.4, "hips": Vector3(0.22, hs + 0.07, -0.12), "yaw": 0.0, "lean": 0.45,
-			"ik": {"LeftFoot": [Vector3(0.46, ank, -0.03), 1.0], "RightFoot": [Vector3(0.08, 0.62, -0.42), 1.0]}.merged(hands)},
-		{"t": 1.9, "hips": Vector3(0.0, hs, -0.1), "yaw": 0.0, "lean": 0.4,
-			"ik": {"LeftFoot": [Vector3(0.15, ank, -0.06), 1.0], "RightFoot": [Vector3(-0.15, ank, -0.06), 1.0]}.merged(hands)},
-		{"t": 2.5, "hips": b.SEAT_HIPS, "yaw": 0.0, "lean": 0.6, "ik": _bike_ik()},
+		# стала зліва, біля сідла
+		{"t": 0.45, "hips": Vector3(0.36, hs, -0.08), "yaw": 0.0,
+			"ik": {"LeftFoot": [Vector3(0.42, ank, -0.03), 1.0], "RightFoot": [Vector3(0.3, ank, -0.13), 1.0]}},
+		# бере кермо обома руками
+		{"t": 0.95, "hips": Vector3(0.34, hs - 0.02, -0.05), "yaw": 0.0, "lean": 0.3,
+			"ik": {"LeftFoot": [Vector3(0.42, ank, -0.03), 1.0], "RightFoot": [Vector3(0.3, ank, -0.13), 1.0]}.merged(hands)},
+		# нахиляє велосипед до себе, вага — на ліву ногу
+		{"t": 1.35, "hips": Vector3(0.32, hs - 0.04, -0.06), "yaw": 0.0, "lean": 0.38, "tilt": 0.24,
+			"ik": {"LeftFoot": [Vector3(0.42, ank, -0.03), 1.0], "RightFoot": [Vector3(0.3, ank, -0.13), 1.0]}.merged(hands)},
+		# відводить праву ногу назад і вгору
+		{"t": 1.8, "hips": Vector3(0.26, hs + 0.01, -0.08), "yaw": 0.0, "lean": 0.55, "tilt": 0.26,
+			"ik": {"LeftFoot": [Vector3(0.42, ank, -0.03), 1.0], "RightFoot": [Vector3(0.2, 0.58, -0.44), 1.0]}.merged(hands)},
+		# перекидає її через сідло
+		{"t": 2.25, "hips": Vector3(0.14, hs, -0.08), "yaw": 0.0, "lean": 0.5, "tilt": 0.2,
+			"ik": {"LeftFoot": [Vector3(0.4, ank, -0.03), 1.0], "RightFoot": [Vector3(-0.08, 0.6, -0.36), 1.0]}.merged(hands)},
+		# права нога — на землю з правого боку, велосипед між ногами
+		{"t": 2.65, "hips": Vector3(0.07, hs - 0.04, -0.06), "yaw": 0.0, "lean": 0.42, "tilt": 0.09,
+			"ik": {"LeftFoot": [Vector3(0.3, ank, -0.03), 1.0], "RightFoot": [Vector3(-0.19, ank, -0.07), 1.0]}.merged(hands)},
+		# вирівнює велосипед і підступає лівою ближче
+		{"t": 3.05, "hips": Vector3(0.0, hs - 0.03, -0.05), "yaw": 0.0, "lean": 0.4,
+			"ik": {"LeftFoot": [Vector3(0.18, ank, -0.04), 1.0], "RightFoot": [Vector3(-0.18, ank, -0.07), 1.0]}.merged(hands)},
+		# права нога — на педаль
+		{"t": 3.5, "hips": Vector3(0.0, hs - 0.02, -0.08), "yaw": 0.0, "lean": 0.45,
+			"ik": {"LeftFoot": [Vector3(0.18, ank, -0.04), 1.0], "RightFoot": ["pedal_r", 1.0]}.merged(hands)},
+		# відштовхується лівою й сідає на сідло
+		{"t": 3.95, "hips": b.SEAT_HIPS + Vector3(0, 0.02, 0), "yaw": 0.0, "lean": 0.55,
+			"ik": {"LeftFoot": [Vector3(0.17, ank + 0.02, -0.1), 1.0], "RightFoot": ["pedal_r", 1.0]}.merged(hands)},
+		# ліва нога — на другу педаль
+		{"t": 4.35, "hips": b.SEAT_HIPS, "yaw": 0.0, "lean": 0.6, "ik": _bike_ik()},
 	]
 	await _play_keys(b, keys)
 	if _keys_abort:
@@ -1253,6 +1407,9 @@ func mount_bike(b: Node3D) -> void:
 
 
 func dismount_bike() -> void:
+	## Злазить, як справжня дитина: ставить ліву ногу на землю, встає з сідла над рамою,
+	## нахиляє велосипед до себе, перекидає праву ногу назад через сідло, стає зліва,
+	## вирівнює велосипед і лише тоді відпускає кермо.
 	var b := mount
 	mounting = true
 	var hs := 0.69
@@ -1260,12 +1417,27 @@ func dismount_bike() -> void:
 	var hands := {"LeftHand": ["grip_l", 1.0], "RightHand": ["grip_r", 1.0]}
 	var keys := [
 		{"t": 0.0, "hips": b.SEAT_HIPS, "yaw": 0.0, "lean": 0.6, "ik": _bike_ik()},
-		{"t": 0.5, "hips": Vector3(0.0, hs, -0.1), "yaw": 0.0, "lean": 0.4,
-			"ik": {"LeftFoot": [Vector3(0.15, ank, -0.06), 1.0], "RightFoot": [Vector3(-0.15, ank, -0.06), 1.0]}.merged(hands)},
-		{"t": 1.1, "hips": Vector3(0.22, hs + 0.07, -0.12), "yaw": 0.0, "lean": 0.45,
-			"ik": {"LeftFoot": [Vector3(0.3, ank, -0.03), 1.0], "RightFoot": [Vector3(0.08, 0.62, -0.42), 1.0]}.merged(hands)},
-		{"t": 1.7, "hips": Vector3(0.42, hs, -0.05), "yaw": 0.0, "lean": 0.0,
-			"ik": {"LeftFoot": [Vector3(0.48, ank, -0.03), 1.0], "RightFoot": [Vector3(0.36, ank, -0.07), 1.0],
+		# ліва нога — на землю, велосипед трохи хилиться вліво
+		{"t": 0.5, "hips": b.SEAT_HIPS + Vector3(0.02, 0, 0), "yaw": 0.0, "lean": 0.5, "tilt": 0.07,
+			"ik": {"LeftFoot": [Vector3(0.2, ank, -0.06), 1.0], "RightFoot": ["pedal_r", 1.0]}.merged(hands)},
+		# встає з сідла: стоїть над рамою, обидві ноги на землі
+		{"t": 1.0, "hips": Vector3(0.02, hs - 0.03, -0.05), "yaw": 0.0, "lean": 0.4, "tilt": 0.1,
+			"ik": {"LeftFoot": [Vector3(0.2, ank, -0.05), 1.0], "RightFoot": [Vector3(-0.18, ank, -0.07), 1.0]}.merged(hands)},
+		# нахиляє велосипед до себе, вага — на ліву ногу
+		{"t": 1.4, "hips": Vector3(0.1, hs - 0.03, -0.06), "yaw": 0.0, "lean": 0.42, "tilt": 0.22,
+			"ik": {"LeftFoot": [Vector3(0.3, ank, -0.04), 1.0], "RightFoot": [Vector3(-0.19, ank, -0.07), 1.0]}.merged(hands)},
+		# права нога — назад і вгору над сідлом
+		{"t": 1.85, "hips": Vector3(0.18, hs + 0.01, -0.08), "yaw": 0.0, "lean": 0.55, "tilt": 0.26,
+			"ik": {"LeftFoot": [Vector3(0.36, ank, -0.03), 1.0], "RightFoot": [Vector3(-0.06, 0.6, -0.38), 1.0]}.merged(hands)},
+		# переносить її на лівий бік
+		{"t": 2.3, "hips": Vector3(0.28, hs, -0.08), "yaw": 0.0, "lean": 0.48, "tilt": 0.24,
+			"ik": {"LeftFoot": [Vector3(0.42, ank, -0.03), 1.0], "RightFoot": [Vector3(0.22, 0.55, -0.43), 1.0]}.merged(hands)},
+		# права нога — на землю поруч із лівою
+		{"t": 2.7, "hips": Vector3(0.35, hs - 0.02, -0.07), "yaw": 0.0, "lean": 0.3, "tilt": 0.1,
+			"ik": {"LeftFoot": [Vector3(0.42, ank, -0.03), 1.0], "RightFoot": [Vector3(0.3, ank, -0.13), 1.0]}.merged(hands)},
+		# вирівнює велосипед, випрямляється й відпускає кермо
+		{"t": 3.2, "hips": Vector3(0.38, hs, -0.06), "yaw": 0.0, "lean": 0.0,
+			"ik": {"LeftFoot": [Vector3(0.44, ank, -0.03), 1.0], "RightFoot": [Vector3(0.32, ank, -0.12), 1.0],
 				"LeftHand": ["grip_l", 0.0], "RightHand": ["grip_r", 0.0]}},
 	]
 	await _play_keys(b, keys)
@@ -1299,43 +1471,56 @@ func mount_cab(v: Node3D, kind: String) -> void:
 		say(["Заводжу мотор!", "Поїхали!", "Я — комбайнерка!"][randi() % 3], 2.0)
 		return
 	v.open_door(true)
+	# як дідусь: стає біля приступки обличчям до трактора, хапається за крило, ставить праву ногу на приступку,
+	# підтягується, переступає на підніжку, повертається до керма й сідає на край сидіння
 	var C: Vector3 = c["climb"]
-	var D: Vector3 = c["sill"]
+	var ST: Vector3 = (c["steps"] as Array)[0]
+	var F: Vector3 = c["hold"]
 	var S: Vector3 = c["seat"]
-	var hs := _hips_up()                   # справжня висота стегон Ніки — ноги дістають приступки, а не висить у повітрі
-	var ank := 0.1
-	var yi := PI / 2.0                     # обличчям до машини (драбинка — з правого боку, −x)
+	var fl: Vector3 = (c["feet"] as Array)[0]
+	var fr: Vector3 = (c["feet"] as Array)[1]
+	var hs := _hips_up()
+	var ank := ANK
+	var yi := PI / 2.0
+	var gl := C + Vector3(0, ank, -0.08)
+	var gr := C + Vector3(0, ank, 0.08)
+	var board := Vector3(-0.12, fr.y, 0.66)
+	var rail := Vector3(-0.3, 1.33, 1.38)
+	var H0 := Vector3(C.x, hs, C.z)
+	var t0 := 0.45
 	var keys := [
-		{"t": 0.0, "hips": Vector3(G.x, hs, G.z), "yaw": yi,
-			"ik": {"LeftFoot": [Vector3(G.x, ank, G.z + 0.08), 1.0], "RightFoot": [Vector3(G.x, ank, G.z - 0.08), 1.0]}},
-		{"t": 0.45, "hips": Vector3(C.x, hs, C.z), "yaw": yi,
-			"ik": {"LeftFoot": [Vector3(C.x, ank, C.z + 0.08), 1.0], "RightFoot": [Vector3(C.x, ank, C.z - 0.08), 1.0]}},
+		{"t": 0.0, "hips": Vector3(G.x, hs, G.z), "yaw": yi, "anim": "walk", "anim_speed": 0.9,
+			"ik": {"LeftFoot": [Vector3(G.x, ank, G.z - 0.08), 0.0], "RightFoot": [Vector3(G.x, ank, G.z + 0.08), 0.0]}},
+		{"t": t0, "hips": H0, "yaw": yi, "lean": 0.0, "anim": "idle",
+			"ik": {"LeftFoot": [gl, 1.0], "RightFoot": [gr, 1.0]}},
+		{"t": t0 + 0.55, "hips": H0 + Vector3(0.04, -0.04, -0.03), "yaw": yi, "lean": 0.22,
+			"ik": {"LeftFoot": [gl, 1.0], "RightFoot": [gr + Vector3(0.12, 0.2, 0.02), 1.0],
+				"LeftHand": [F, 1.0], "RightHand": [rail, 0.7]}},
+		{"t": t0 + 1.0, "hips": H0 + Vector3(0.1, -0.05, 0.0), "yaw": yi, "lean": 0.3,
+			"ik": {"LeftFoot": [gl, 1.0], "RightFoot": [ST + Vector3(0, ank, 0.08), 1.0],
+				"LeftHand": [F, 1.0], "RightHand": [rail, 1.0]}},
+		{"t": t0 + 1.75, "hips": Vector3(ST.x - 0.06, ST.y + hs - 0.04, ST.z), "yaw": yi, "lean": 0.2,
+			"ik": {"LeftFoot": [Vector3(ST.x - 0.3, ST.y * 0.6, ST.z - 0.12), 1.0], "RightFoot": [ST + Vector3(0, ank, 0.08), 1.0],
+				"LeftHand": [F, 1.0], "RightHand": ["grip_r", 1.0]}},
+		{"t": t0 + 2.2, "hips": Vector3(ST.x + 0.02, ST.y + hs, ST.z - 0.02), "yaw": yi, "lean": 0.12,
+			"ik": {"LeftFoot": [ST + Vector3(0.04, ank, -0.1), 1.0], "RightFoot": [ST + Vector3(0, ank, 0.08), 1.0],
+				"LeftHand": [F, 1.0], "RightHand": ["grip_r", 1.0]}},
+		{"t": t0 + 2.85, "hips": Vector3(board.x - 0.05, board.y - ank + hs, board.z + 0.05), "yaw": 0.6, "lean": 0.1,
+			"ik": {"LeftFoot": [board + Vector3(0.24, 0.12, 0.05), 1.0], "RightFoot": [board + Vector3(-0.08, 0, 0.08), 1.0],
+				"LeftHand": ["grip_l", 0.6], "RightHand": ["grip_r", 1.0]}},
+		{"t": t0 + 3.4, "hips": Vector3(0.0, maxf(board.y - ank + hs - 0.02, S.y - 0.05), (0.5 + S.z) * 0.5 + 0.1), "yaw": 0.0, "lean": 0.15,
+			"ik": {"LeftFoot": [fl, 1.0], "RightFoot": [fr, 1.0],
+				"LeftHand": ["grip_l", 1.0], "RightHand": ["grip_r", 1.0]}},
+		{"t": t0 + 4.1, "hips": S, "yaw": 0.0, "lean": 0.12,
+			"ik": {"LeftFoot": [fl, 1.0], "RightFoot": [fr, 1.0],
+				"LeftHand": ["grip_l", 1.0], "RightHand": ["grip_r", 1.0]}},
 	]
-	# як дідусь: спершу хапається руками за крило/поручень, тоді ставить ногу на приступку й підтягується
-	var grab: Vector3 = c.get("hold", C + Vector3(0.45, 1.0, 0.0))
-	keys.append({"t": 0.95, "hips": Vector3(C.x + 0.05, hs, C.z), "yaw": yi, "lean": 0.15,
-		"ik": {"LeftFoot": [Vector3(C.x, ank, C.z + 0.08), 1.0], "RightFoot": [Vector3(C.x, ank, C.z - 0.08), 1.0],
-			"LeftHand": [grab + Vector3(0, 0, 0.16), 1.0], "RightHand": [grab + Vector3(0, 0.1, -0.16), 1.0]}})
-	var t := 0.95
-	var prev_foot := Vector3(C.x, ank, C.z)
-	for st in c["steps"]:
-		var P: Vector3 = st
-		t += 0.6
-		var hand: Vector3 = c.get("hold", P + Vector3(0.25, 0.85, 0.0))
-		if not c.has("hold"):
-			hand = Vector3(P.x + 0.2, P.y + 0.95, P.z)
-		keys.append({"t": t, "hips": Vector3(P.x - 0.22, P.y + hs - 0.05, P.z), "yaw": yi, "lean": 0.25,
-			"ik": {"LeftFoot": [P + Vector3(0, ank, 0.09), 1.0], "RightFoot": [prev_foot + Vector3(0, 0.15, -0.09), 1.0],
-				"LeftHand": [hand + Vector3(0, 0, 0.16), 1.0], "RightHand": [hand + Vector3(0, 0.1, -0.16), 1.0]}})
-		prev_foot = P + Vector3(0, ank, 0)
-	t += 0.6
-	keys.append({"t": t, "hips": Vector3(D.x - 0.05, D.y + hs, D.z), "yaw": yi, "lean": 0.1,
-		"ik": {"LeftFoot": [D + Vector3(0.05, ank, 0.08), 1.0], "RightFoot": [D + Vector3(-0.05, ank, -0.08), 1.0]}})
-	t += 0.5
-	keys.append({"t": t, "hips": Vector3(S.x - 0.1, D.y + hs, S.z + 0.1), "yaw": 0.6,
-		"ik": {"LeftFoot": [Vector3(S.x - 0.0, D.y + ank, S.z + 0.15), 1.0], "RightFoot": [Vector3(S.x - 0.2, D.y + ank, S.z + 0.05), 1.0]}})
-	t += 0.6
-	keys.append({"t": t, "hips": S, "yaw": 0.0, "lean": 0.15, "ik": _cab_ik(v, c)})
+	# посередині руху тіло переходить у позу «сидить» (стегна вже керуються ключами)
+	var sit_later := func():
+		await get_tree().create_timer(t0 + 2.9).timeout
+		if mounting and mount == v and pose and not _keys_abort:
+			create_tween().tween_property(pose, "sit", 1.0, 0.6)
+	sit_later.call()
 	await _play_keys(v, keys)
 	if _keys_abort:
 		return
@@ -1361,41 +1546,39 @@ func dismount_cab() -> void:
 		_mount_done()
 		return
 	v.open_door(true)
+	# як дідусь: устає, переступає на приступку, обертається обличчям назовні — і зістрибує на землю
 	var C: Vector3 = c["climb"]
-	var D: Vector3 = c["sill"]
+	var ST: Vector3 = (c["steps"] as Array)[0]
+	var F: Vector3 = c["hold"]
 	var S: Vector3 = c["seat"]
-	var hs := _hips_up()                   # справжня висота стегон Ніки — ноги дістають приступки, а не висить у повітрі
-	var ank := 0.1
-	var yi := PI / 2.0
+	var fl: Vector3 = (c["feet"] as Array)[0]
+	var fr: Vector3 = (c["feet"] as Array)[1]
+	var hs := _hips_up()
+	var ank := ANK
+	var yo := -PI / 2.0
+	var board := Vector3(-0.12, fr.y, 0.66)
 	var keys := [
-		{"t": 0.0, "hips": S, "yaw": 0.0, "lean": 0.15, "ik": _cab_ik(v, c)},
-		{"t": 0.6, "hips": Vector3(S.x - 0.1, D.y + hs, S.z + 0.1), "yaw": -1.2,
-			"ik": {"LeftFoot": [Vector3(S.x, D.y + ank, S.z + 0.15), 1.0], "RightFoot": [Vector3(S.x - 0.2, D.y + ank, S.z + 0.05), 1.0]}},
-		{"t": 1.1, "hips": Vector3(D.x - 0.05, D.y + hs, D.z), "yaw": yi, "lean": 0.1,
-			"ik": {"LeftFoot": [D + Vector3(0.05, ank, 0.08), 1.0], "RightFoot": [D + Vector3(-0.05, ank, -0.08), 1.0]}},
+		{"t": 0.0, "hips": S, "yaw": 0.0, "lean": 0.12,
+			"ik": {"LeftFoot": [fl, 1.0], "RightFoot": [fr, 1.0], "LeftHand": ["grip_l", 1.0], "RightHand": ["grip_r", 1.0]}},
+		{"t": 0.8, "hips": Vector3(-0.05, maxf(board.y - ank + hs, S.y - 0.05), 0.5), "yaw": -0.3, "lean": 0.25,
+			"ik": {"LeftFoot": [fl, 1.0], "RightFoot": [board + Vector3(-0.1, 0, 0.05), 1.0], "LeftHand": ["grip_l", 0.8], "RightHand": ["grip_r", 1.0]}},
+		{"t": 1.6, "hips": Vector3(ST.x + 0.12, ST.y + hs + 0.02, ST.z - 0.05), "yaw": yo + 0.4, "lean": 0.1,
+			"ik": {"LeftFoot": [board + Vector3(0.1, 0.1, 0.1), 0.8], "RightFoot": [ST + Vector3(0.05, ank, -0.1), 1.0],
+				"LeftHand": ["grip_r", 0.6], "RightHand": [F, 0.8]}},
+		{"t": 2.3, "hips": Vector3(ST.x - 0.02, ST.y + hs, ST.z), "yaw": yo, "lean": 0.05,
+			"ik": {"LeftFoot": [ST + Vector3(-0.02, ank, 0.1), 1.0], "RightFoot": [ST + Vector3(-0.02, ank, -0.1), 1.0],
+				"LeftHand": [F, 0.5], "RightHand": [F, 0.5]}},
+		{"t": 2.55, "hips": Vector3(ST.x - 0.06, ST.y + hs - 0.1, ST.z), "yaw": yo, "lean": 0.25,
+			"ik": {"LeftFoot": [ST + Vector3(-0.02, ank, 0.1), 1.0], "RightFoot": [ST + Vector3(-0.02, ank, -0.1), 1.0],
+				"LeftHand": [F, 0.0], "RightHand": [F, 0.0]}},
+		{"t": 2.85, "hips": Vector3((ST.x + C.x) * 0.5, ST.y * 0.5 + hs + 0.08, ST.z), "yaw": yo, "lean": 0.1,
+			"ik": {"LeftFoot": [Vector3((ST.x + C.x) * 0.5, ST.y * 0.45, ST.z + 0.09), 1.0], "RightFoot": [Vector3((ST.x + C.x) * 0.5, ST.y * 0.45, ST.z - 0.09), 1.0]}},
+		{"t": 3.1, "hips": Vector3(C.x, hs - 0.12, ST.z), "yaw": yo, "lean": 0.3,
+			"ik": {"LeftFoot": [Vector3(C.x, ank, ST.z + 0.09), 1.0], "RightFoot": [Vector3(C.x, ank, ST.z - 0.09), 1.0]}},
+		{"t": 3.55, "hips": Vector3(C.x, hs, ST.z), "yaw": yo, "lean": 0.0, "anim": "idle",
+			"ik": {"LeftFoot": [Vector3(C.x, ank, ST.z + 0.09), 1.0], "RightFoot": [Vector3(C.x, ank, ST.z - 0.09), 1.0]}},
+		{"t": 3.7, "hips": Vector3(C.x, hs, ST.z), "yaw": yo, "lean": 0.0},
 	]
-	var t := 1.1
-	var steps: Array = (c["steps"] as Array).duplicate()
-	steps.reverse()
-	for st in steps:
-		var P: Vector3 = st
-		t += 0.55
-		var hand := Vector3(P.x + 0.2, P.y + 0.95, P.z)
-		if c.has("hold"):
-			hand = c["hold"]
-		keys.append({"t": t, "hips": Vector3(P.x - 0.22, P.y + hs - 0.05, P.z), "yaw": yi, "lean": 0.25,
-			"ik": {"LeftFoot": [P + Vector3(0, ank, 0.09), 1.0], "RightFoot": [P + Vector3(0, ank, -0.09), 1.0],
-				"LeftHand": [hand + Vector3(0, 0, 0.16), 1.0], "RightHand": [hand + Vector3(0, 0.1, -0.16), 1.0]}})
-	# стає на землю, ще тримаючись (як дідусь), тоді відпускає й відступає
-	var grab: Vector3 = c.get("hold", C + Vector3(0.45, 1.0, 0.0))
-	t += 0.6
-	keys.append({"t": t, "hips": Vector3(C.x + 0.05, hs, C.z), "yaw": yi, "lean": 0.15,
-		"ik": {"LeftFoot": [Vector3(C.x, ank, C.z + 0.08), 1.0], "RightFoot": [Vector3(C.x, ank, C.z - 0.08), 1.0],
-			"LeftHand": [grab + Vector3(0, 0, 0.16), 1.0], "RightHand": [grab + Vector3(0, 0.1, -0.16), 1.0]}})
-	t += 0.45
-	keys.append({"t": t, "hips": Vector3(C.x - 0.15, hs, C.z), "yaw": yi,
-		"ik": {"LeftFoot": [Vector3(C.x - 0.15, ank, C.z + 0.08), 1.0], "RightFoot": [Vector3(C.x - 0.15, ank, C.z - 0.08), 1.0],
-			"LeftHand": [grab + Vector3(0, 0, 0.16), 0.0], "RightHand": [grab + Vector3(0, 0.1, -0.16), 0.0]}})
 	await _play_keys(v, keys)
 	v.open_door(false)
 	if _keys_abort:

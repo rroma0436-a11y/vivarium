@@ -244,3 +244,144 @@ static func smooth_normals(holder: Node) -> void:
 			out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 			out.surface_set_material(s, mi.get_active_material(s))
 		mi.mesh = out
+
+
+
+const NIKA_SHARE := {"walk": "walking", "run": "running", "talk": "talk_with_left", "pick": "female_bend_over_pick_up",
+	"crouch_pick": "crouch_pick", "tree_pick": "stand_pick_fruit", "pocket": "put_in_pocket", "drink": "stand_and_drink",
+	"stand": "sit_to_stand", "sit_down": "stand_to_sit", "sleep": "toss_and_turn", "open_door": "open_door"}
+
+
+static func give_nika_anims(ap: AnimationPlayer, anims = null) -> void:
+	## Рухи Ніки (крім її власних) — персонажу, у якого їх немає. anims: роль → назва (якщо є).
+	if ap == null:
+		return
+	var need := {}
+	for role in NIKA_SHARE:
+		var own := find_anim(ap, [NIKA_SHARE[role]])
+		if anims != null and own != "" and String(anims.get(role, "")) == "":
+			anims[role] = own
+		if own == "":
+			need[role] = NIKA_SHARE[role]
+	var got := share_anims(ap, "girl", need)
+	if anims == null:
+		return
+	for role in got:
+		var r: String = role if String(anims.get(role, "")) == "" else role + "2"
+		anims[r] = got[role]
+
+
+static func _bkey(n: String) -> String:
+	var k := n.to_lower()
+	if ":" in k:
+		k = k.get_slice(":", k.get_slice_count(":") - 1)
+	if k.begins_with("mixamorig"):
+		k = k.substr(9)
+	return k.lstrip("_")
+
+
+static func _hips(sk: Skeleton3D) -> int:
+	for i in sk.get_bone_count():
+		if _bkey(sk.get_bone_name(i)) == "hips":
+			return i
+	return -1
+
+
+static func _xf_to(n: Node, top: Node) -> Transform3D:
+	var xf := Transform3D.IDENTITY
+	while n != null and n != top:
+		if n is Node3D:
+			xf = (n as Node3D).transform * xf
+		n = n.get_parent()
+	return xf
+
+
+static func _grest(sk: Skeleton3D, b: int) -> Transform3D:
+	var xf := sk.get_bone_rest(b)
+	var p := sk.get_bone_parent(b)
+	while p >= 0:
+		xf = sk.get_bone_rest(p) * xf
+		p = sk.get_bone_parent(p)
+	return xf
+
+
+static var _src := {}
+static var _done := {}
+
+
+static func share_anims(ap: AnimationPlayer, from_id: String, map: Dictionary) -> Dictionary:
+	## Анімації іншої моделі-людини → у ap під назвою "nika_…" (перенос через позу спокою). map: роль → ключ назви.
+	var out := {}
+	if ap == null or map.is_empty() or not exists(from_id) or not ap.has_animation_library(""):
+		return out
+	var root := ap.get_node_or_null(ap.root_node)
+	if root == null:
+		return out
+	var sks := root.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return out
+	var sk: Skeleton3D = sks[0]
+	if not _src.has(from_id):
+		_src[from_id] = load(DIR % from_id).instantiate()
+	var src: Node = _src[from_id]
+	var sap := anim_player(src)
+	var ssks := src.find_children("*", "Skeleton3D", true, false)
+	if sap == null or ssks.is_empty():
+		return out
+	var ssk: Skeleton3D = ssks[0]
+	var tk := _xf_to(sk, root)
+	var skx := _xf_to(ssk, src)
+	var by_key := {}
+	for i in sk.get_bone_count():
+		by_key[_bkey(sk.get_bone_name(i))] = i
+	var hb := _hips(sk)
+	var shb := _hips(ssk)
+	var k := 1.0
+	if hb >= 0 and shb >= 0:
+		var hs := (skx * _grest(ssk, shb)).origin.y
+		if absf(hs) > 1e-5:
+			k = (tk * _grest(sk, hb)).origin.y / hs
+	var path := String(root.get_path_to(sk))
+	var lib := ap.get_animation_library("")
+	for role in map:
+		var an := find_anim(sap, [String(map[role])])
+		if an == "":
+			continue
+		var nn := "nika_" + an
+		var ck := root.scene_file_path + "|" + nn
+		if not lib.has_animation(nn) and _done.has(ck) and root.scene_file_path != "":
+			lib.add_animation(nn, _done[ck])
+		if not lib.has_animation(nn):
+			var a := sap.get_animation(an).duplicate(true) as Animation
+			for t in range(a.get_track_count() - 1, -1, -1):
+				var sb := String(a.track_get_path(t).get_concatenated_subnames())
+				var ty := a.track_get_type(t)
+				var si := ssk.find_bone(sb) if sb != "" else -1
+				var ti: int = by_key.get(_bkey(sb), -1) if si >= 0 else -1
+				if ti < 0 or not (ty == Animation.TYPE_ROTATION_3D or (ty == Animation.TYPE_POSITION_3D and si == shb)):
+					a.remove_track(t)
+					continue
+				a.track_set_path(t, NodePath(path + ":" + sk.get_bone_name(ti)))
+				if ty == Animation.TYPE_ROTATION_3D:
+					var qa := (skx.basis * _grest(ssk, si).basis).orthonormalized().get_rotation_quaternion()
+					var qb := (tk.basis * _grest(sk, ti).basis).orthonormalized().get_rotation_quaternion()
+					var ls := sk.get_bone_rest(ti).basis.orthonormalized().get_rotation_quaternion()
+					var lss := ssk.get_bone_rest(si).basis.orthonormalized().get_rotation_quaternion()
+					var m := qb.inverse() * qa
+					for i in a.track_get_key_count(t):
+						var q: Quaternion = a.track_get_key_value(t, i)
+						a.track_set_key_value(t, i, (ls * m * (lss.inverse() * q) * m.inverse()).normalized())
+				else:
+					var sp := ssk.get_bone_parent(si)
+					var tp := sk.get_bone_parent(ti)
+					var fs := skx.basis * (_grest(ssk, sp).basis if sp >= 0 else Basis.IDENTITY)
+					var ft := tk.basis * (_grest(sk, tp).basis if tp >= 0 else Basis.IDENTITY)
+					var r0 := ssk.get_bone_rest(si).origin
+					var t0 := sk.get_bone_rest(ti).origin
+					for i in a.track_get_key_count(t):
+						var v: Vector3 = a.track_get_key_value(t, i)
+						a.track_set_key_value(t, i, t0 + ft.inverse() * (fs * (v - r0) * k))
+			lib.add_animation(nn, a)
+			_done[ck] = a
+		out[role] = nn
+	return out
