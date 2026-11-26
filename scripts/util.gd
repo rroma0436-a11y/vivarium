@@ -51,7 +51,7 @@ static func road_mat(k := 1.0) -> StandardMaterial3D:
 	if _road_mats.has(k):
 		return _road_mats[k]
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.63 * k, 0.53 * k, 0.4 * k)
+	m.albedo_color = Color(0.7 * k, 0.643 * k, 0.545 * k)
 	if ResourceLoader.exists("res://assets/textures/sand.jpg"):
 		m.albedo_texture = load("res://assets/textures/sand.jpg")
 		m.uv1_triplanar = true
