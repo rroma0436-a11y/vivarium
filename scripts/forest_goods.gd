@@ -9,6 +9,8 @@ const R := 40.0
 const FAR := Rect2(-200.0, -468.0, 400.0, 146.0)     # увесь дальній ліс за пшеничним полем: x, z, ширина, глибина
 const FAR_LIMIT := 432.0                              # не далі межі, куди можна зайти
 
+const EAST_C := Vector3(122.0, 0, -18.0)            # галявина грибного лісу на сході (EAST_FOREST_C у world_outer.gd)
+
 var goods: Array = []          # {node, kind, pos, taken}
 var _last_day := -1
 
@@ -18,6 +20,9 @@ const KINDS := {
 	"pidberezovyk": ["Підберезник", true], "openky": ["Опеньки", true], "syroizhky": ["Сироїжки", true],
 	"ozhyna": ["Ожина", true], "brusnytsi": ["Брусниці", true], "vovchi": ["Вовчі ягоди — отруйні, не чіпаємо!", false],
 	"romashka": ["Ромашка", true], "zvirobii": ["Звіробій", true], "chebrets": ["Чебрець", true], "myata": ["М'ята", true],
+	"pidosykovyk": ["Підосичник", true], "maslyuk": ["Маслюки", true], "ryzhyk": ["Рижики", true],
+	"poganka": ["Бліда поганка — отруйна, не чіпаємо!", false], "malynnyk": ["Малина", true],
+	"deryvii": ["Деревій", true], "dzvinochky": ["Дзвіночки", true], "paporot": ["Папороть — хай росте", false],
 }
 
 var _mats := {}
@@ -56,6 +61,7 @@ func build(tree_spots: Array) -> void:
 		n.add_child(pa)
 		goods.append({"node": n, "kind": kind, "pos": p, "taken": false})
 	_far_goods(tree_spots)
+	_east_goods(tree_spots)
 	# м'який мох і опале листя під деревами — плями на землі
 	var moss := Util.mat(Color(0.25, 0.4, 0.18), 1.0)
 	var leaves := Util.mat(Color(0.5, 0.38, 0.2), 1.0)
@@ -143,8 +149,207 @@ func _far_goods(tree_spots: Array) -> void:
 		placed += 1
 
 
+static func in_east(q: Vector2, pad := 0.0) -> bool:
+	## Грибний ліс на сході (як in_east_forest у world_outer.gd).
+	if q.y < -102.0 + pad or q.y > 72.0 - pad or q.x > 163.0 - pad:
+		return false
+	if q.x < 103.0 - (q.y + 102.0) * 0.1437 + pad:
+		return false
+	return not Rect2(69.0, -23.0, 32.0, 30.0).has_point(q)
+
+
+func _east_road_near(q: Vector2, w: float) -> bool:
+	var pts := [Vector2(71.0, 5.0), Vector2(100.0, 5.5), Vector2(112.0, 0.0), Vector2(118.0, -10.0), Vector2(121.0, -16.0)]
+	for i in pts.size() - 1:
+		var a: Vector2 = pts[i]
+		var ba: Vector2 = pts[i + 1] - a
+		if q.distance_to(a + ba * clampf((q - a).dot(ba) / ba.dot(ba), 0.0, 1.0)) < w:
+			return true
+	return false
+
+
+func _east_goods(tree_spots: Array) -> void:
+	## Грибний ліс на сході: багато грибів, кущі малини, ягоди й трави; земля в мохових подушках, голках і шишках.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 79
+	var cell := 2.0
+	var grid := {}
+	for t in tree_spots:
+		if t[0] < 70.0:
+			continue
+		var k := Vector2i(floori(t[0] / cell), floori(t[1] / cell))
+		if not grid.has(k):
+			grid[k] = []
+		grid[k].append(Vector2(t[0], t[1]))
+	var plan := ["borovyk", "malynnyk", "pidosykovyk", "maslyuk", "chornytsi", "lysychky", "malynnyk", "syroizhky", "romashka",
+		"borovyk", "ryzhyk", "maslyuk", "sunytsi", "pidberezovyk", "malynnyk", "openky", "zvirobii", "brusnytsi", "lysychky",
+		"mukhomor", "paporot", "chebrets", "pidosykovyk", "malynnyk", "chornytsi", "dzvinochky", "maslyuk", "ryzhyk", "myata",
+		"borovyk", "paporot", "ozhyna", "syroizhky", "deryvii", "malyna", "poganka", "lysychky", "pidberezovyk", "vovchi", "paporot"]
+	var placed := 0
+	var tries := 0
+	while placed < 240 and tries < 4000:
+		tries += 1
+		var p := Vector3.ZERO
+		if placed < 40:
+			var a := rng.randf() * TAU
+			p = EAST_C + Vector3(cos(a), 0, sin(a)) * rng.randf_range(6.5, 22.0)      # біля галявини — щоб було що збирати одразу
+		else:
+			p = Vector3(rng.randf_range(78.0, 163.0), 0, rng.randf_range(-102.0, 72.0))
+		var q := Vector2(p.x, p.z)
+		if not in_east(q, 1.5) or _east_road_near(q, 2.2) or q.distance_to(Vector2(EAST_C.x, EAST_C.z)) < 6.0:
+			continue
+		var c := Vector2i(floori(p.x / cell), floori(p.z / cell))
+		var ok := true
+		for dx in range(-1, 2):
+			for dz in range(-1, 2):
+				for o in grid.get(c + Vector2i(dx, dz), []):
+					if (o as Vector2).distance_to(q) < 1.5:
+						ok = false
+		if not ok:
+			continue
+		if not grid.has(c):
+			grid[c] = []
+		grid[c].append(q)
+		var kind: String = plan[placed % plan.size()]
+		var n := Node3D.new()
+		n.position = p
+		n.rotation.y = rng.randf() * TAU
+		add_child(n)
+		_make(n, kind, rng)
+		var pa := Util.pick_area("forest_item", Vector3(1.0, 0.8, 1.0) if kind != "malynnyk" else Vector3(1.2, 1.4, 1.2), Vector3(0, 0.35, 0) if kind != "malynnyk" else Vector3(0, 0.65, 0))
+		pa.set_meta("item", goods.size())
+		n.add_child(pa)
+		goods.append({"node": n, "kind": kind, "pos": p, "taken": false})
+		placed += 1
+	# мохові подушки, плями соснових голок і шишки
+	var moss_a := _mat(Color(0.2, 0.38, 0.12), 1.0)
+	var moss_b := _mat(Color(0.3, 0.47, 0.15), 1.0)
+	var needles := _mat(Color(0.55, 0.37, 0.18), 1.0)
+	var cone_m := _mat(Color(0.45, 0.28, 0.14), 0.9)
+	var i := 0
+	var t2 := 0
+	while i < 230 and t2 < 3000:
+		t2 += 1
+		var q3 := Vector3(rng.randf_range(78.0, 163.0), 0, rng.randf_range(-102.0, 72.0))
+		if not in_east(Vector2(q3.x, q3.z), 0.5) or _east_road_near(Vector2(q3.x, q3.z), 2.0):
+			continue
+		i += 1
+		match i % 4:
+			0, 1:
+				var mc := _ball(0.5, moss_a if i % 3 else moss_b, q3, Vector3(rng.randf_range(1.2, 2.6), 0.18, rng.randf_range(1.2, 2.6)))
+				mc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				add_child(mc)
+			2:
+				var nd := Util.cyl(rng.randf_range(1.0, 2.2), rng.randf_range(1.0, 2.2), 0.02, needles, q3 + Vector3(0, 0.035, 0))
+				nd.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				add_child(nd)
+			3:
+				for k in 3:
+					var cn := _ball(0.05, cone_m, q3 + Vector3(rng.randf_range(-0.6, 0.6), 0.04, rng.randf_range(-0.6, 0.6)), Vector3(0.8, 0.8, 1.5))
+					cn.rotation.y = rng.randf() * TAU
+					cn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					add_child(cn)
+	# пеньки з мохом і повалені замшілі колоди
+	var bark := _mat(Color(0.4, 0.28, 0.18), 0.95)
+	var cut := _mat(Color(0.8, 0.66, 0.45), 0.9)
+	var s := 0
+	var t3 := 0
+	while s < 22 and t3 < 600:
+		t3 += 1
+		var q4 := Vector3(rng.randf_range(80.0, 161.0), 0, rng.randf_range(-100.0, 70.0))
+		if not in_east(Vector2(q4.x, q4.z), 2.0) or _east_road_near(Vector2(q4.x, q4.z), 3.0):
+			continue
+		s += 1
+		if s % 4 == 0:
+			var lg := Util.cyl(0.24, 0.28, rng.randf_range(3.0, 5.0), bark, q4 + Vector3(0, 0.25, 0))
+			lg.rotation = Vector3(0, rng.randf() * TAU, PI / 2.0)
+			add_child(lg)
+			var lm := _ball(0.5, moss_b, q4 + Vector3(0, 0.42, 0), Vector3(1.4, 0.25, 1.4))
+			lm.rotation.y = lg.rotation.y
+			add_child(lm)
+			Obstacles.add_outer(q4.x, q4.z, 1.4, 0.6)
+		else:
+			add_child(Util.cyl(0.28, 0.34, 0.45, bark, q4 + Vector3(0, 0.22, 0)))
+			add_child(Util.cyl(0.28, 0.28, 0.02, cut, q4 + Vector3(0, 0.46, 0)))
+			add_child(_ball(0.5, moss_a, q4 + Vector3(0, 0.47, 0), Vector3(0.5, 0.12, 0.5)))
+			Obstacles.add_outer(q4.x, q4.z, 0.4, 0.5)
+
+
+func _rasp(n: Node3D, rng: RandomNumberGenerator) -> void:
+	## Кущ малини: високі стебла, листя й червоні ягоди (ягоди — у вузлі berries, щоб зникали, коли зібрали).
+	var cane := _mat(Color(0.42, 0.3, 0.2), 0.85)
+	var leaf := _mat(Color(0.27, 0.5, 0.2), 0.85)
+	var leaf2 := _mat(Color(0.33, 0.56, 0.24), 0.85)
+	var bm := _mat(Color(0.86, 0.13, 0.32), 0.35)
+	var berries := Node3D.new()
+	berries.name = "berries"
+	n.add_child(berries)
+	for k in 7:
+		var o := Vector3(rng.randf_range(-0.35, 0.35), 0, rng.randf_range(-0.35, 0.35))
+		var h := rng.randf_range(0.85, 1.35)
+		var tilt := Vector3(o.x, 0, o.z).normalized() * rng.randf_range(0.1, 0.3) if o.length() > 0.01 else Vector3.ZERO
+		var top := o + Vector3(tilt.x, h, tilt.z)
+		var st := Util.cyl(0.011, 0.016, h, cane, (o + top) * 0.5)
+		st.basis = Basis(Quaternion(Vector3.UP, (top - o).normalized()))
+		st.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(st)
+		for j in 3:
+			var f := 0.45 + j * 0.25
+			var lp := o.lerp(top, f)
+			n.add_child(_ball(0.14, leaf if (j + k) % 2 else leaf2, lp + Vector3(rng.randf_range(-0.06, 0.06), 0, rng.randf_range(-0.06, 0.06)), Vector3(1.2, 0.6, 1.2)))
+			for b in 2:
+				var a := rng.randf() * TAU
+				berries.add_child(_ball(0.03, bm, lp + Vector3(cos(a) * 0.13, -0.05, sin(a) * 0.13)))
+
+
+func _fern(n: Node3D, rng: RandomNumberGenerator) -> void:
+	## Папороть: розкидисті перисті листки.
+	var lm := _mat(Color(0.24, 0.48, 0.18), 0.85)
+	var lm2 := _mat(Color(0.3, 0.55, 0.22), 0.85)
+	for k in 8:
+		var pv := Node3D.new()
+		pv.rotation.y = k * TAU / 8.0 + rng.randf_range(-0.2, 0.2)
+		n.add_child(pv)
+		var ln := rng.randf_range(0.55, 0.8)
+		var fr := Util.box(Vector3(0.05, 0.012, ln), lm, Vector3(0, 0.22, ln * 0.45))
+		fr.rotation.x = -0.55
+		fr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pv.add_child(fr)
+		for j in 5:
+			var z := ln * (0.15 + j * 0.16)
+			var w := 0.26 * (1.0 - j * 0.15)
+			var pin := Util.box(Vector3(w, 0.008, 0.07), lm2, Vector3(0, 0.22 + z * 0.55 - ln * 0.25, z * 0.85))
+			pin.rotation.x = -0.55
+			pin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			pv.add_child(pin)
+
+
 func _make(n: Node3D, kind: String, rng: RandomNumberGenerator) -> void:
 	match kind:
+		"pidosykovyk":
+			_mushroom(n, Color(0.88, 0.38, 0.1), Color(0.92, 0.9, 0.85), 0.15, 0.26, rng, 3)
+		"maslyuk":
+			for k in 3:
+				var c := Node3D.new()
+				c.position = Vector3(rng.randf_range(-0.18, 0.18), 0, rng.randf_range(-0.18, 0.18))
+				n.add_child(c)
+				_mushroom(c, Color(0.42, 0.26, 0.12), Color(0.92, 0.82, 0.5), 0.08, rng.randf_range(0.07, 0.11), rng, 0)
+		"ryzhyk":
+			for k in 2:
+				var c := Node3D.new()
+				c.position = Vector3(rng.randf_range(-0.16, 0.16), 0, rng.randf_range(-0.16, 0.16))
+				n.add_child(c)
+				_mushroom(c, Color(0.95, 0.5, 0.15), Color(0.95, 0.6, 0.3), 0.09, 0.08, rng, 0)
+		"poganka":
+			_mushroom(n, Color(0.82, 0.86, 0.68), Color(0.96, 0.96, 0.92), 0.13, 0.22, rng, 0)
+		"malynnyk":
+			_rasp(n, rng)
+		"paporot":
+			_fern(n, rng)
+		"deryvii":
+			_herb(n, Color(0.3, 0.5, 0.22), Color(0.96, 0.95, 0.9), Color(0.9, 0.9, 0.85), 8, 0.42, rng)
+		"dzvinochky":
+			_herb(n, Color(0.3, 0.52, 0.24), Color(0.45, 0.4, 0.85), Color(0.35, 0.3, 0.75), 6, 0.38, rng)
 		"borovyk":
 			_mushroom(n, Color(0.5, 0.3, 0.15), Color(0.95, 0.92, 0.82), 0.16, 0.2, rng, 1)
 		"lysychky":
@@ -329,6 +534,18 @@ func kind_color(i: int) -> Color:
 			return Color(0.7, 0.45, 0.8)
 		"myata":
 			return Color(0.4, 0.72, 0.4)
+		"pidosykovyk":
+			return Color(0.88, 0.38, 0.1)
+		"maslyuk":
+			return Color(0.42, 0.26, 0.12)
+		"ryzhyk":
+			return Color(0.95, 0.5, 0.15)
+		"malynnyk":
+			return Color(0.86, 0.13, 0.32)
+		"deryvii":
+			return Color(0.96, 0.95, 0.9)
+		"dzvinochky":
+			return Color(0.45, 0.4, 0.85)
 	return Color(0.6, 0.5, 0.3)
 
 

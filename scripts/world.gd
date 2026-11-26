@@ -254,6 +254,21 @@ void fragment() {
 	float psd = length(max(pq, vec2(0.0))) + min(max(pq.x, pq.y), 0.0) - 6.0;
 	bank = max(bank, 1.0 - smoothstep(1.0, 3.5, psd));
 	c = mix(c, mix(vec3(0.78, 0.7, 0.5), vec3(0.78, 0.7, 0.5) * st / vec3(0.83, 0.70, 0.55), use_tex), bank * 0.85);
+	// грибний ліс на сході: земля вкрита мохом і сосновими голками (межа — як in_east_forest у world_outer.gd)
+	float fx = min(p.x - (103.0 - (p.y + 102.0) * 0.1437), 163.0 - p.x);
+	float fz = min(p.y + 102.0, 72.0 - p.y);
+	vec2 fq = abs(p - vec2(85.0, -8.0)) - vec2(16.0, 15.0);      // поле під оранку — без моху
+	float fpl = length(max(fq, vec2(0.0))) + min(max(fq.x, fq.y), 0.0);
+	float fm = smoothstep(-2.0, 7.0, min(min(fx, fz), fpl) + (nz(p * 0.25) - 0.5) * 6.0);
+	if (fm > 0.001) {
+		float mn = nz(p * 0.33) * 0.6 + nz(p * 1.7) * 0.4;
+		vec3 moss = mix(vec3(0.17, 0.32, 0.09), vec3(0.33, 0.47, 0.14), nz(p * 2.3));
+		moss *= 0.85 + nz(p * 9.0) * 0.3;
+		float streak = nz(vec2(p.x * 14.0 + p.y * 3.0, p.y * 2.5 - p.x * 1.2)) * 0.6 + nz(vec2(p.y * 13.0 - p.x * 2.0, p.x * 2.2)) * 0.4;
+		vec3 needles = mix(vec3(0.42, 0.27, 0.13), vec3(0.66, 0.46, 0.24), streak);
+		vec3 floor_c = mix(moss, needles, smoothstep(0.42, 0.62, mn));
+		c = mix(c, floor_c, fm * (1.0 - path));
+	}
 	float far = smoothstep(160.0, 420.0, length(p - vec2(0.0, 20.0)));
 	ALBEDO = mix(c, far_col, far * 0.7);
 	ROUGHNESS = 1.0;

@@ -229,8 +229,10 @@ func drop() -> Node3D:
 	return o
 
 
-# дорога до грибного лісу (збігається з FOREST_ROAD у world_outer.gd) — ходять діда й Ніка
-const FOREST_WAY := [Vector3(-24.0, 0, 8.5), Vector3(-24.0, 0, -50.0), Vector3(-29.0, 0, -70.0), Vector3(-30.0, 0, -80.0)]
+# дорога до грибного лісу на сході (збігається з EAST_ROAD у world_outer.gd): повз навіс трактора й поле — до галявини
+const FOREST_WAY := [Vector3(1.5, 0, 6.2), Vector3(10.5, 0, 6.0), Vector3(22.5, 0, 5.0), Vector3(71.0, 0, 5.0), Vector3(100.0, 0, 5.5),
+	Vector3(112.0, 0, 0.0), Vector3(118.0, 0, -10.0), Vector3(121.0, 0, -16.0)]
+const FOREST_BOUNDS := Rect2(-62.0, -110.0, 230.0, 200.0)     # від двору до грибного лісу на сході
 
 
 func take_basket() -> Node3D:

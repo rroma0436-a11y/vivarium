@@ -62,6 +62,7 @@ func build(w) -> void:
 	_make_wheat(rng)
 	_make_wheat_field()
 	_make_field_road()
+	_make_east_road()
 	_make_mill()
 	_make_forest(rng)
 	_make_meadow(rng)
@@ -79,7 +80,7 @@ func build(w) -> void:
 		["Пшеничне поле", Vector3(WHEAT_N.get_center().x, 0, WHEAT_N.get_center().y), 20.0],
 		["Садок", Vector3(11.2, 0, 14.2), 7.0],
 		["Поле", Vector3(PLOW_FIELD.get_center().x, 0, PLOW_FIELD.get_center().y), 12.0],
-		["Ліс", Vector3(80, 0, -20), 0.0],
+		["Грибний ліс", EAST_FOREST_C, 0.0],
 		["Базар", Vector3(0, 0, 182), 22.0],
 	]
 
@@ -100,6 +101,8 @@ func place_name(p: Vector3) -> String:
 		return {"house": "Хата", "church": "Церква", "stall": "Ларьок"}.get(bb["kind"], "Базар")
 	if BAZAAR_AREA.has_point(Vector2(p.x, p.z)):
 		return "Базар" if absf(p.x) < 9.0 and p.z > 160.0 and p.z < 200.0 else "Вулиця біля базару"
+	if in_east_forest(Vector2(p.x, p.z)):
+		return "Грибний ліс"
 	if p.x > 70.0 or p.z > 115.0 or (p.x > 25.0 and p.z < 10.0):
 		return "Ліс"
 	var al := air_local(p)
@@ -1588,7 +1591,7 @@ func _on_road(p: Vector3) -> bool:
 		var t := clampf((q - a).dot(ba) / ba.dot(ba), 0.0, 1.0)
 		if q.distance_to(a + ba * t) < 1.6:
 			return true
-	if _near_forest_road(q, 1.6):
+	if _near_forest_road(q, 1.6) or _near_east_road(q, 1.6):
 		return true
 	if _near_air_road(q, AIR_ROAD_W / 2.0 + 0.3):
 		return true
@@ -1717,6 +1720,32 @@ func _near_forest_road(q: Vector2, w: float) -> bool:
 		if q.distance_to(a + ba * t) < w:
 			return true
 	return false
+# грибний ліс на сході (за полем під оранку): густий, з мохом і сосновими голками; дорога від воріт повз навіс трактора
+const EAST_FOREST_C := Vector3(122.0, 0, -18.0)          # галявина в лісі, куди веде дорога (так само в forest_goods.gd)
+const EAST_ROAD := [Vector2(1.5, 6.2), Vector2(10.5, 6.0), Vector2(22.5, 5.0), Vector2(71.0, 5.0), Vector2(100.0, 5.5),
+	Vector2(112.0, 0.0), Vector2(118.0, -10.0), Vector2(121.0, -16.0)]
+const EAST_ROAD_W := 3.0
+
+
+static func in_east_forest(q: Vector2, pad := 0.0) -> bool:
+	## Чи точка в грибному лісі на сході (з півночі вужчий, на південь ширшає; поле під оранку — не ліс).
+	if q.y < -102.0 + pad or q.y > 72.0 - pad or q.x > 163.0 - pad:
+		return false
+	if q.x < 103.0 - (q.y + 102.0) * 0.1437 + pad:
+		return false
+	return not PLOW_FIELD.grow(5.0).has_point(q)
+
+
+func _near_east_road(q: Vector2, w: float) -> bool:
+	for i in range(3, EAST_ROAD.size() - 1):
+		var a: Vector2 = EAST_ROAD[i]
+		var ba: Vector2 = EAST_ROAD[i + 1] - a
+		var t := clampf((q - a).dot(ba) / ba.dot(ba), 0.0, 1.0)
+		if q.distance_to(a + ba * t) < w:
+			return true
+	return q.distance_to(Vector2(EAST_FOREST_C.x, EAST_FOREST_C.z)) < 7.0 + w * 0.5
+
+
 const ORCHARD := Rect2(2.5, 6.5, 17.5, 15.5)
 const PLOW_FIELD := Rect2(74.0, -18.0, 22.0, 20.0)      # поле під оранку: на 50 м далі від городу, 22×20 м
 const FIELD_ROAD := [Vector2(22.5, 5.0), Vector2(71.0, 5.0), Vector2(75.5, 2.2)]     # піщана дорога від навісу трактора до поля
@@ -1808,6 +1837,91 @@ func _thicken_far_forest(kinds: Array, heights: Dictionary, chunk: float, bucket
 		added += 1
 
 
+func _thicken_east_forest(kinds: Array, heights: Dictionary, chunk: float, buckets: Dictionary) -> void:
+	## Грибний ліс на сході — густіший (більше сосен). Дорога й галявина — без дерев. Свій rng — решта лісу як була.
+	for key in buckets:
+		var keep: Array = []
+		for it in buckets[key]:
+			var p0: Vector3 = it[0]
+			if not _near_east_road(Vector2(p0.x, p0.z), 3.5):
+				keep.append(it)
+		buckets[key] = keep
+	trees = trees.filter(func(t): return not _near_east_road(Vector2(t[0], t[1]), 3.5))
+	_obst = _obst.filter(func(o): return o[3] != 6.0 or not _near_east_road(Vector2(o[0], o[1]), 3.5))
+	var rf := RandomNumberGenerator.new()
+	rf.seed = 4343
+	var ek := ["pine_lo", "pine_lo", "pine_lo", "birch_a_lo", "birch_b_lo", "pine_lo"]
+	var cell := 3.2
+	var used := {}
+	for t in trees:
+		used[Vector2i(floori(t[0] / cell), floori(t[1] / cell))] = true
+	var added := 0
+	var tries := 0
+	while added < 420 and tries < 6000:
+		tries += 1
+		var p := Vector3(rf.randf_range(78.0, 163.0), 0, rf.randf_range(-102.0, 72.0))
+		var k: String = ek[rf.randi() % ek.size()]
+		if not kinds.has(k):
+			k = kinds[0]
+		var hr: Array = heights[k]
+		var ang := rf.randf() * TAU
+		var th := rf.randf_range(hr[0], hr[1] + 1.5)
+		var q := Vector2(p.x, p.z)
+		if not in_east_forest(q, 1.0) or _near_east_road(q, 3.5) or not _ok_tree(p) or not Models.exists(k):
+			continue
+		if _near_plow(q, 4.0):
+			continue
+		var c := Vector2i(floori(p.x / cell), floori(p.z / cell))
+		if used.has(c):
+			continue
+		used[c] = true
+		var key := "%d_%d_%s" % [floori(p.x / chunk), floori(p.z / chunk), k]
+		if not buckets.has(key):
+			buckets[key] = []
+		buckets[key].append([p, ang, th])
+		trees.append([p.x, p.z])
+		_obst.append([p.x, p.z, 0.5, 6.0])
+		added += 1
+
+
+func _make_east_road() -> void:
+	## Ґрунтова дорога від поля під оранку до галявини в грибному лісі (з колією посередині).
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hw := EAST_ROAD_W / 2.0
+	for i in range(3, EAST_ROAD.size() - 1):
+		var a: Vector2 = EAST_ROAD[i]
+		var b: Vector2 = EAST_ROAD[i + 1]
+		var sd := (b - a).normalized()
+		var side := Vector2(sd.y, -sd.x) * hw
+		var ext := sd * hw
+		for v in [a - ext + side, b + side, a - ext - side, a - ext - side, b + side, b - side]:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(Vector3(v.x, 0.024 + i * 0.003, v.y))
+	var road := MeshInstance3D.new()
+	road.name = "east_forest_road"
+	road.mesh = st.commit()
+	road.material_override = Util.road_mat()
+	road.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(road)
+	var rut := Util.road_mat(0.82)
+	for i in range(3, EAST_ROAD.size() - 1):
+		var a: Vector2 = EAST_ROAD[i]
+		var b: Vector2 = EAST_ROAD[i + 1]
+		var d := b - a
+		var nrm := Vector2(d.normalized().y, -d.normalized().x)
+		for s in [-0.75, 0.75]:
+			var c: Vector2 = (a + b) / 2.0 + nrm * float(s)
+			var box := Util.box(Vector3(0.45, 0.01, d.length()), rut, Vector3(c.x, 0.03 + i * 0.003, c.y))
+			box.rotation.y = atan2(d.x, d.y)
+			box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(box)
+	# галявина в кінці дороги — витоптана
+	var gl := Util.cyl(5.5, 5.5, 0.02, Util.road_mat(0.9), Vector3(EAST_FOREST_C.x, 0.02, EAST_FOREST_C.z))
+	gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(gl)
+
+
 func _make_forest(rng: RandomNumberGenerator) -> void:
 	var kinds := ["birch_b_lo", "pine_lo", "birch_a_lo", "pine_lo"]
 	var heights := {"birch_b_lo": [7.0, 10.0], "pine_lo": [8.0, 12.0], "birch_a_lo": [6.5, 9.0]}
@@ -1858,6 +1972,7 @@ func _make_forest(rng: RandomNumberGenerator) -> void:
 		_obst.append([p.x, p.z, 0.5, 6.0])
 		n += 1
 	_thicken_far_forest(kinds, heights, chunk, buckets)
+	_thicken_east_forest(kinds, heights, chunk, buckets)
 	# зразок кожного виду: меш і як він стоїть у моделі
 	var proto := {}
 	for k in kinds:
@@ -1872,6 +1987,8 @@ func _make_forest(rng: RandomNumberGenerator) -> void:
 		var k := ks.substr(ks.find("_", ks.find("_") + 1) + 1)
 		var pr: Array = proto[k]
 		var list: Array = buckets[key]
+		if list.is_empty():
+			continue
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.mesh = pr[0]

@@ -1449,21 +1449,54 @@ func orchard_job() -> void:
 	end_job(id)
 
 
+var _forest_ride := true          # по гриби — то трактором, то пішки (по черзі)
+
+
 func forest_job() -> void:
-	## Іде дорогою в грибний ліс із кошиком, збирає гриби й ягоди (лісові дари відростають щодня).
+	## Іде (або їде трактором) дорогою в грибний ліс на сході, збирає гриби й ягоди (лісові дари відростають щодня).
 	if forest == null:
 		return
 	var id := begin_job("forest")
-	say("Піду в ліс по гриби та ягоди!", 2.5)
+	var ride: bool = _forest_ride and tractor != null and tractor.state == "parked"
+	_forest_ride = not _forest_ride
+	say("Поїду трактором у ліс по гриби!" if ride else "Піду в ліс по гриби та ягоди!", 2.5)
 	if not await _go_outside(id):
 		return
-	var basket := take_basket()
-	for wp in FOREST_WAY:
-		await go(wp)
+	bounds = FOREST_BOUNDS
+	var end: Vector3 = FOREST_WAY[FOREST_WAY.size() - 1]
+	if ride:
+		await go(Vector3(12.0, 0, 6.0))
 		if id != job:
 			return
+		if not await _go_to_tractor(id):
+			return
+		bounds = FOREST_BOUNDS
+		await _climb_on(tractor)
+		if id != job:
+			_climb_off(tractor)
+			return
+		tractor.start_engine()
+		say("Ну, Червоненький, гайда в ліс!", 2.5)
+		await wait(1.0)
+		var there: Array = [Vector3(23.0, 0, 4.0)]
+		for k in range(3, FOREST_WAY.size()):
+			there.append(FOREST_WAY[k])
+		await tractor.drive_route(there, 3.4)
+		if id != job:
+			return
+		await _climb_off(tractor)
+		if id != job:
+			return
+		bounds = FOREST_BOUNDS
+		extra_obs = Obstacles.outer
+	var basket := take_basket()
+	if not ride:
+		for wp in FOREST_WAY:
+			await go(wp)
+			if id != job:
+				return
 	var got := 0
-	for it in forest.nearest_goods(FOREST_WAY[FOREST_WAY.size() - 1], 5):
+	for it in forest.nearest_goods(end, 6):
 		await go(forest.goods_pos(it) + Vector3(0.5, 0, 0.5))
 		if id != job:
 			return
@@ -1482,6 +1515,31 @@ func forest_job() -> void:
 	say("Назбирав %d — буде на вечерю!" % got if got > 0 else "Сьогодні все вже позбирали…", 3.0)
 	if got > 0:
 		Game.emit_event("forest")
+	if ride:
+		drop_basket()
+		if not await _go_to_tractor(id):
+			return
+		await _climb_on(tractor)
+		if id != job:
+			_climb_off(tractor)
+			return
+		tractor.start_engine()
+		say("Додому, Червоненький!", 2.0)
+		var back: Array = []
+		for k in range(FOREST_WAY.size() - 2, 2, -1):
+			back.append(FOREST_WAY[k])
+		await tractor.drive_route(back, 3.4)
+		await tractor.go_park([Vector3(23.0, 0, 3.2), Vector3(17.5, 0, 2.8), Vector3(15.8, 0, 4.6), Vector3(16.8, 0, 6.0)])
+		await _climb_off(tractor)
+		if id != job:
+			return
+		await go(Vector3(12.0, 0, 6.0))
+		if id != job:
+			return
+		if not await _come_back(id):
+			return
+		end_job(id)
+		return
 	for k in range(FOREST_WAY.size() - 1, -1, -1):
 		await go(FOREST_WAY[k])
 		if id != job:

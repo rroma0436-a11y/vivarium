@@ -1717,7 +1717,7 @@ func _nika_do(what: String) -> void:
 			girl.eat_held()
 		"nk_forest":
 			var r := _girl_route_to(Vector3(0, 0, 9.0))
-			for q in world.outer.FOREST_ROAD:
+			for q in world.outer.EAST_ROAD:
 				r.append(Vector3(q.x, 0, q.y))
 			_nika_walk(r, "Іду в ліс по гриби та ягоди!")
 		"nk_home":
@@ -3535,6 +3535,7 @@ func _do_mount() -> void:
 func dismount() -> void:
 	if _mount_state != "ride":
 		return
+	_auto_ride = []
 	_mount_state = "dismount"
 	_mount_v = 0.0
 	hud.flight.land_text = ""
@@ -3684,6 +3685,19 @@ func _mount_drive(delta: float) -> void:
 	var fwd := -Vector3(sin(yr), 0, cos(yr))
 	var right := Vector3(cos(yr), 0, -sin(yr))
 	var mv := right * j.x + fwd * j.y
+	if not _auto_ride.is_empty() and _mount_kind in ["bike", "horse"]:
+		if j.length() > 0.2:
+			_auto_ride = []                      # джойстик — далі кермуєш сам
+		else:
+			var tg: Vector3 = _auto_ride[0]
+			if Vector2(tg.x - m.global_position.x, tg.z - m.global_position.z).length() < 2.5:
+				_auto_ride.pop_front()
+				if _auto_ride.is_empty():
+					girl.say("Приїхали в грибний ліс! Злізаю — і по гриби.", 3.0)
+			if not _auto_ride.is_empty():
+				var tg2: Vector3 = _auto_ride[0]
+				mv = Vector3(tg2.x - m.global_position.x, 0, tg2.z - m.global_position.z).normalized()
+				fast = true
 	var is_bike := _mount_kind == "bike"
 	var cabv := _mount_kind == "combine" or _mount_kind == "tractor"
 	var vmax := (5.2 if fast else 3.0) if is_bike else (5.5 if fast else 1.8)
@@ -3746,7 +3760,29 @@ func _mount_drive(delta: float) -> void:
 	else:
 		m.hitch_move(m.rotation.y, _mount_v, 0.0)
 	girl.ride_step(delta, _mount_v)
-	_mount_follow(delta, (absf(_mount_v) > 0.2) if cabv else (mv.length() > 0.3 and j.y > 0.25))
+	_mount_follow(delta, (absf(_mount_v) > 0.2) if cabv else (mv.length() > 0.3 and (j.y > 0.25 or not _auto_ride.is_empty())))
+
+
+var _auto_ride: Array = []              # велосипед чи коник сам везе Ніку цими точками (у грибний ліс)
+
+
+func _forest_ride_route(from: Vector3) -> Array:
+	## Дорога в грибний ліс для велосипеда й коня: з дороги на південь повз садок (в обхід причепа), далі — дорогою до лісу.
+	var road: Array = world.outer.EAST_ROAD
+	var pts: Array = [Vector3(0.6, 0, 25.0), Vector3(23.0, 0, 25.0), Vector3(23.0, 0, 12.5), Vector3(29.0, 0, 12.5), Vector3(29.0, 0, 5.0)]
+	for i in range(3, road.size()):
+		pts.append(Vector3(road[i].x, 0, road[i].y))
+	var best := 0
+	var bd := INF
+	for i in pts.size():
+		var d := Vector2(pts[i].x - from.x, pts[i].z - from.z).length()
+		if d < bd:
+			bd = d
+			best = i
+	var r: Array = Vehicles.route(from, pts[best])
+	for i in range(best + 1, pts.size()):
+		r.append(pts[i])
+	return r
 
 
 var _cab_steer := 0.0
@@ -4239,12 +4275,14 @@ func _show_vehicle_menu() -> void:
 				["vm_trot", "Риссю", Color(0.65, 0.45, 0.25)],
 				["vm_gallop", "Галопом!", Color(0.75, 0.35, 0.2)],
 				["vm_pat", "Погладити коника", Color(0.45, 0.6, 0.4)],
+				["vm_forest", "У грибний ліс", Color(0.35, 0.55, 0.3)],
 				["vm_off", "Злізти", Color(0.45, 0.45, 0.6)]], Color(0.6, 0.42, 0.25))
 		"bike":
 			hud.show_choice("Велосипед", [
 				["vm_bell", "Дзвоник: дзінь-дзінь!", Color(0.3, 0.6, 0.85)],
 				["vm_slow", "Їхати повільно", Color(0.4, 0.6, 0.45)],
 				["vm_fast", "Їхати швидко", Color(0.8, 0.45, 0.25)],
+				["vm_forest", "У грибний ліс", Color(0.35, 0.55, 0.3)],
 				["vm_off", "Злізти", Color(0.45, 0.45, 0.6)]], Color(0.3, 0.6, 0.85))
 		"combine":
 			hud.show_choice("Комбайн", [
@@ -4279,5 +4317,9 @@ func _vehicle_do(name: String) -> void:
 		"vm_horn":
 			girl.say("Біп-біп!", 1.4)
 			audio.play("robot_beep", -4.0, 0.5)
+		"vm_forest":
+			if _mount:
+				_auto_ride = _forest_ride_route(_mount.global_position)
+				girl.say("Їду в ліс по гриби та ягоди!", 2.0)
 		"vm_off":
 			dismount()

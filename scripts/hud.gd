@@ -446,6 +446,7 @@ const GIRL_ITEMS := [
 	["nk_basket_put", "Поставити кошик", Color(0.6, 0.45, 0.3)],
 	["nk_eat", "З'їсти", Color(0.85, 0.5, 0.2)],
 	["nk_put", "Покласти з рук", Color(0.55, 0.5, 0.45)],
+	["nk_forest", "У грибний ліс", Color(0.35, 0.55, 0.3)],
 	["nk_horse", "Покликати коня", Color(0.55, 0.38, 0.22)],
 	["nk_jump", "Пострибати", Color(0.85, 0.3, 0.4)],
 	["nk_beep", "Покликати Beep", Color(0.3, 0.72, 0.7)],
@@ -963,6 +964,9 @@ func _paint_map(R: Rect2, S: int, near: bool) -> Image:
 	line.call(Vector2(0, 36), Vector2(26, 32), 1.2, dirt)
 	for fi in outer.FOREST_ROAD.size() - 1:
 		line.call(outer.FOREST_ROAD[fi], outer.FOREST_ROAD[fi + 1], 1.2, dirt)
+	for fi in range(2, outer.EAST_ROAD.size() - 1):
+		line.call(outer.EAST_ROAD[fi], outer.EAST_ROAD[fi + 1], 1.2, dirt)
+	disc.call(outer.EAST_FOREST_C.x, outer.EAST_FOREST_C.z, 4.0, dirt)
 	disc.call(outer.VILLAGE.x, outer.VILLAGE.z, 9.0, dirt)
 	if outer.bazaar:
 		for rp in outer.bazaar.map_road_pts:

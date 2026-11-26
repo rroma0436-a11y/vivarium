@@ -992,7 +992,7 @@ func forest_job() -> void:
 		await go(Vector3(0.6, 0, 20.0), true)
 		if id != job:
 			return
-	bounds = FAR
+	bounds = FOREST_BOUNDS
 	var basket := take_basket()
 	await go(main.world.spots["outside_gate"] + Vector3(0.4, 0, 1.2), true)
 	if id != job:
