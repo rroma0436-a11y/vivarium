@@ -2337,6 +2337,7 @@ func _store(o) -> void:
 	if home and is_instance_valid(home):
 		home.add_child(o)
 		o.transform = o.get_meta("home_tr", Transform3D())
+		o.set_meta("to", "workshop")
 		var fill: Node = o.get_node_or_null("fill")
 		if fill:
 			for c in fill.get_children():
@@ -2395,12 +2396,17 @@ func _cargo_kind(k: String) -> Node3D:
 
 func _deliver(id: int) -> void:
 	## Удома: мішки й солому — у сарай, вудку, стільчик і відро — у майстерню, кошик — на ґанок.
-	for dest in ["barn", "workshop", "porch"]:
+	for dest in ["barn", "workshop", "granny", "porch"]:
 		var here: Array = []
 		for o in _carry:
 			if is_instance_valid(o) and String(o.get_meta("to", "porch")) == dest:
 				here.append(o)
 		if here.is_empty():
+			continue
+		if dest == "granny":
+			await _give_granny(id)
+			if id != job:
+				return
 			continue
 		var p: Vector3 = spots["barn"] if dest == "barn" else (SHOP_STAND if dest == "workshop" else spots["porch"] + Vector3(0.6, 0, 0.7))
 		await go(p)
@@ -2419,6 +2425,59 @@ func _deliver(id: int) -> void:
 			_hold_carry(rest)
 		await wait(0.3)
 	say("Ось і вдома!", 2.0)
+
+
+func _give_granny(id: int) -> void:
+	## Відро з рибою — бабусі Галі (якщо її нема на подвір'ї чи руки зайняті — лишає на ґанку).
+	var gr = _main().granny
+	var bucket: Node3D = _gear.get("bucket")
+	var ok: bool = gr != null and is_instance_valid(gr) and gr.visible and not bool(gr.get("outside")) \
+		and not bool(gr.get("in_house")) and gr.held == null
+	if ok:
+		for i in 4:
+			var to: Vector3 = (gr as Node3D).global_position
+			var dir := global_position - to
+			dir.y = 0.0
+			if dir.length() < 1.6:
+				break
+			await go(to + dir.normalized() * 1.1)
+			if id != job:
+				return
+		ok = is_instance_valid(gr) and gr.visible and gr.held == null
+	if not ok:
+		await go(spots["porch"] + Vector3(0.6, 0, 0.7))
+		if id != job:
+			return
+	if ok:
+		face((gr as Node3D).global_position)
+		gr.face(global_position)
+		say("Галю, ось рибка — звари юшки!", 3.0)
+	else:
+		say("Галю, рибку на ґанку лишаю — на юшку!", 3.0)
+	play("pick")
+	await wait(0.8)
+	var items := _drop_carry()
+	play("idle")
+	for o in items:
+		if o != bucket or not ok:
+			_store(o)
+	if ok:
+		gr.hold_upright(bucket, 0.3, false, 0.1)
+		await wait(1.0)
+		if is_instance_valid(gr):
+			gr.say("Ой, дякую, діду! Буде юшка!", 3.0)
+		_bucket_back_later(gr, bucket)
+	await wait(0.5)
+
+
+func _bucket_back_later(gr, bucket: Node3D) -> void:
+	## Бабуся забрала рибу — порожнє відро знову в майстерні.
+	await get_tree().create_timer(6.0).timeout
+	if not is_instance_valid(bucket) or bucket in _carry or bucket in _cargo or _rod_hand:
+		return
+	if gr != null and is_instance_valid(gr) and gr.held == bucket:
+		gr.drop()
+	_store(bucket)
 
 
 # ---------------- віз: сісти, злізти, їхати, розпрягти й запрягти в дорозі
@@ -2483,13 +2542,27 @@ func _horse_go(id: int, cart: Node3D, p: Vector3, v: float, reach: float, steer:
 		var hp: Vector3 = h.global_position
 		if Vector2(p.x - hp.x, p.z - hp.z).length() < reach:
 			break
-		var tgt: Vector3 = Vehicles.steer_target(hp, p, 1.4) if steer else p
+		var tgt: Vector3 = Vehicles.steer_target(hp, p, 2.0) if steer else p
 		var to := tgt - hp
 		to.y = 0.0
 		var hd := lerp_angle(h.rotation.y, atan2(to.x, to.z), 1.0 - exp(-dt * 2.2))
 		var sp := minf(v, maxf(0.5, to.length() * 1.2))
 		cart.speed = move_toward(cart.speed, sp, dt * 1.5)
 		h.hitch_move(hd, cart.speed, dt)
+		if steer:
+			# не в'їжджаємо в дерева, хати, паркани, ставок: виштовхуємо точку між конем і возом
+			var mid: Vector3 = h.global_position - Vector3(sin(h.rotation.y), 0, cos(h.rotation.y)) * 0.9
+			var mid2 := Vehicles.keep_out(mid, 1.3, cart.global_position)
+			mid2.y = mid.y
+			if mid2.distance_to(mid) > 0.001:
+				h.global_position += mid2 - mid
+				cart.speed = move_toward(cart.speed, 0.6, dt * 3.0)
+			# і віз позаду — щоб не зачепив дерево чи хату на повороті
+			var c0: Vector3 = cart.global_position
+			var c2 := Vehicles.keep_out(c0, 1.0, c0)
+			c2.y = c0.y
+			if c2.distance_to(c0) > 0.001:
+				h.global_position += (c2 - c0) * 0.5
 		h.global_position.y = Util.hill_y(h.global_position) if Util.on_hill(h.global_position) else 0.0
 		await get_tree().process_frame
 	return id == job
@@ -2862,30 +2935,84 @@ func _show_line(at: Vector3) -> void:
 	_line.visible = true
 
 
-func _catch_fish(bucket: Node3D) -> void:
-	## Рибка вилітає з води й падає у відро.
-	var from := _bobber.global_position
+func _make_fish() -> Node3D:
+	## Рибка завдовжки ~20 см.
 	var f := Node3D.new()
 	world.yard_root.add_child(f)
-	f.global_position = from
 	var kinds := ["fish_orange", "fish_blue", "fish_spotted", "fish_guppy"]
-	if Models.spawn(f, kinds[randi() % kinds.size()], 0.24, "realx") == null:
-		f.add_child(Util.sphere(0.06, Util.mat(Color(0.95, 0.55, 0.15), 0.4), Vector3.ZERO, Vector3(2.2, 1.0, 0.8)))
-	var to := bucket.global_position + Vector3(randf_range(-0.04, 0.04), 0.26, randf_range(-0.04, 0.04))
-	var mid := (from + to) * 0.5 + Vector3(0, 1.6, 0)
-	var fly := func(t: float) -> void:
+	var hold := Models.spawn(f, kinds[randi() % kinds.size()], 0.2, "realx")
+	if hold == null:
+		f.add_child(Util.sphere(0.05, Util.mat(Color(0.95, 0.55, 0.15), 0.4), Vector3.ZERO, Vector3(2.0, 0.9, 0.7)))
+	elif hold.get_child_count() > 0:
+		var mdl := hold.get_child(0) as Node3D
+		if mdl:
+			var bb := Models.measure(mdl)
+			var longest := maxf(bb.size.x, maxf(bb.size.y, bb.size.z)) * mdl.scale.x
+			if longest > 0.001:
+				hold.scale = Vector3.ONE * (0.2 / longest)
+	return f
+
+
+func _catch_fish(id: int, bucket: Node3D, cast_at: Vector3) -> void:
+	## Підсікає й витягує рибку на волосіні, бере її лівою рукою й кладе у відро, потім закидає знову.
+	var f := _make_fish()
+	var from := _bobber.global_position
+	f.global_position = from - Vector3(0, 0.15, 0)
+	_bobber.visible = false
+	var fwd := Vector3(sin(rotation.y), 0, cos(rotation.y))
+	var left := Vector3(cos(rotation.y), 0, -sin(rotation.y))
+	var near := global_position + fwd * 0.6 + left * 0.2 + Vector3(0, 0.95, 0)
+	var t := 0.0
+	while t < 1.0:
+		t = minf(1.0, t + get_process_delta_time())
+		if id != job or not is_instance_valid(f):
+			break
+		var k := smoothstep(0.0, 1.0, t)
+		var p := from.lerp(near, k) + Vector3(0, sin(k * PI) * 0.6, 0)
+		_rod_lift = k
+		_bobber.global_position = p
+		f.global_position = p - Vector3(0, 0.12, 0)
+		f.rotation.z = sin(t * 30.0) * 0.4             # трепиться на гачку
+		await get_tree().process_frame
+	# бере рибку лівою рукою
+	t = 0.0
+	while t < 0.5 and id == job and is_instance_valid(f):
+		t += get_process_delta_time()
+		if pose:
+			pose.ik = {"LeftHand": [f.global_position + Vector3(0, 0.08, 0), clampf(t / 0.5, 0.0, 1.0)]}
+		f.rotation.z = sin(t * 30.0) * 0.3
+		await get_tree().process_frame
+	# несе в руці до відра
+	var top := bucket.global_position + Vector3(0, 0.4, 0)
+	t = 0.0
+	while t < 0.9 and id == job and is_instance_valid(f):
+		t += get_process_delta_time()
+		var k2 := smoothstep(0.0, 1.0, t / 0.9)
+		if pose:
+			pose.ik = {"LeftHand": [near.lerp(top, k2), 1.0]}
+		if hand_l:
+			f.global_position = hand_l.global_position - Vector3(0, 0.1, 0)
+		_bobber.global_position = f.global_position + Vector3(0, 0.1, 0)
+		_rod_lift = lerpf(1.0, 0.2, k2)
+		await get_tree().process_frame
+	if id != job or not is_instance_valid(f) or not is_instance_valid(bucket):
 		if is_instance_valid(f):
-			f.global_position = from.lerp(mid, t).lerp(mid.lerp(to, t), t)
-			f.rotation.z = t * TAU
-	var tw := create_tween()
-	tw.tween_method(fly, 0.0, 1.0, 1.1)
-	await tw.finished
-	if is_instance_valid(f) and is_instance_valid(bucket):
-		var fill: Node = bucket.get_node_or_null("fill")
-		f.reparent(fill if fill else bucket, true)
-		f.rotation = Vector3(0, randf() * TAU, PI / 2.0)
-	elif is_instance_valid(f):
-		f.queue_free()
+			f.queue_free()
+		if pose:
+			pose.ik = {}
+		return
+	# у відро
+	var fill: Node = bucket.get_node_or_null("fill")
+	f.reparent(fill if fill else bucket, true)
+	f.position = Vector3(randf_range(-0.04, 0.04), 0.22, randf_range(-0.04, 0.04))
+	f.rotation = Vector3(0, randf() * TAU, PI / 2.0)
+	await wait(0.3)
+	if pose:
+		pose.ik = {}
+	_rod_lift = 0.0
+	# закидає знову
+	_bobber.global_position = Vector3(cast_at.x, 0.06, cast_at.z)
+	_bobber.visible = true
 
 
 func _fish_trip(id: int, cart: Node3D, h: Node3D) -> void:
@@ -2897,6 +3024,7 @@ func _fish_trip(id: int, cart: Node3D, h: Node3D) -> void:
 		end_job(id)
 		return
 	say("Поїду на ставок рибку ловити!", 2.5)
+	bucket.set_meta("to", "granny")                    # відро з рибою — бабусі
 	await go(SHOP_STAND)
 	if id != job:
 		return
@@ -2979,8 +3107,7 @@ func _fish_trip(id: int, cart: Node3D, h: Node3D) -> void:
 		_bob_dip = 0.05
 		await wait(0.7)
 		_bob_dip = 0.0
-		_rod_lift = 0.6
-		await _catch_fish(bucket)
+		await _catch_fish(id, bucket, seat_p + fwd * 3.4)
 		_rod_lift = 0.0
 		if id != job:
 			return
