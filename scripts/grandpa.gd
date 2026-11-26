@@ -1371,6 +1371,7 @@ func horse_job() -> void:
 		return
 	say("Но-о, мій коню, ходи сюди!", 2.0)
 	await cart.bring_horse(horse)
+	cart.harness_now()
 	if id != job:
 		cart.unhitch()
 		return

@@ -313,7 +313,6 @@ func hitch_begin() -> void:
 		visible = true
 		position = door
 	mode = "hitched"
-	show_harness(true)
 	_busy = 0.0
 	_graze = 0.0
 	_path = []
