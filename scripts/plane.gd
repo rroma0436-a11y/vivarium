@@ -25,6 +25,7 @@ var climb := 0.0
 var speed := 0.0
 var in_hangar := true
 var hangar_door: Callable                      # (open: bool) — ворота ангара
+var auto_door := true                          # false — ворота відчиняє й зачиняє Ніка кнопкою (лишаються відчинені)
 
 var model: Node3D
 var prop: Node3D
@@ -135,6 +136,96 @@ func seat_global() -> Vector3:
 	return to_global(SEAT)
 
 
+var _cf := {}
+
+
+func climb_frame() -> Dictionary:
+	## Куди ставати, щоб залізти в кабіну (у системі літака, з самої моделі): крило з правого боку
+	## (задній і передній край, висота), край кабіни. Рахується один раз.
+	if not _cf.is_empty():
+		return _cf
+	var sgn := -1.0
+	var xw := sgn * 1.45
+	var xr := sgn * 0.5
+	var n := 41
+	var z0s := SEAT.z - 2.5
+	var tops := []
+	tops.resize(n)
+	tops.fill(-INF)
+	var rim := -INF
+	if model:
+		var inv := global_transform.affine_inverse()
+		for nd in model.find_children("*", "MeshInstance3D", true, false):
+			var mi := nd as MeshInstance3D
+			if mi.mesh == null:
+				continue
+			var f: PackedVector3Array = (inv * mi.global_transform) * mi.mesh.get_faces()
+			for t in range(0, f.size() - 2, 3):
+				var a := f[t]
+				var b := f[t + 1]
+				var c := f[t + 2]
+				var x0 := minf(a.x, minf(b.x, c.x))
+				var x1 := maxf(a.x, maxf(b.x, c.x))
+				var hw := xw >= x0 and xw <= x1
+				var hr := xr >= x0 and xr <= x1
+				if not hw and not hr:
+					continue
+				var zl := minf(a.z, minf(b.z, c.z))
+				var zh := maxf(a.z, maxf(b.z, c.z))
+				if hw:
+					for i in n:
+						var z := z0s + i * 0.1
+						if z < zl or z > zh:
+							continue
+						var y := _tri_y(a, b, c, xw, z)
+						if y > tops[i] and y < 1.6:
+							tops[i] = y
+				if hr and SEAT.z >= zl and SEAT.z <= zh:
+					var y2 := _tri_y(a, b, c, xr, SEAT.z)
+					if y2 > rim and y2 < 2.4:
+						rim = y2
+	# суцільний шматок крила найближче до кабіни
+	var best := -1
+	for i in n:
+		if tops[i] > 0.1 and (best < 0 or absf(z0s + i * 0.1 - SEAT.z) < absf(z0s + best * 0.1 - SEAT.z)):
+			best = i
+	var wing := false
+	var zt := SEAT.z - 0.6
+	var zf := SEAT.z + 0.6
+	var wy := 0.8
+	if best >= 0:
+		var i0 := best
+		var i1 := best
+		while i0 > 0 and tops[i0 - 1] > 0.1:
+			i0 -= 1
+		while i1 < n - 1 and tops[i1 + 1] > 0.1:
+			i1 += 1
+		var ys: Array = tops.slice(i0, i1 + 1)
+		ys.sort()
+		wy = float(ys[int(ys.size() / 2.0)])
+		zt = z0s + i0 * 0.1
+		zf = z0s + i1 * 0.1
+		wing = i1 - i0 >= 3 and wy > 0.15 and wy < 1.3
+	if rim < 1.45 or rim > 2.2:
+		rim = 1.7
+	var cz := clampf(0.12, zt + 0.3, maxf(zt + 0.3, zf - 0.15))
+	_cf = {"wing": wing, "sgn": sgn, "zt": zt, "zf": zf, "wy": wy, "rim": rim, "cz": cz,
+		"ground": Vector3(sgn * 3.4, 0, zt - 0.45) if wing else Vector3(-2.6, 0, 0.4)}
+	return _cf
+
+
+static func _tri_y(a: Vector3, b: Vector3, c: Vector3, x: float, z: float) -> float:
+	var d := (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z)
+	if absf(d) < 1e-9:
+		return -INF
+	var l1 := ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / d
+	var l2 := ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / d
+	var l3 := 1.0 - l1 - l2
+	if l1 < -0.001 or l2 < -0.001 or l3 < -0.001:
+		return -INF
+	return l1 * a.y + l2 * b.y + l3 * c.y
+
+
 func flying() -> bool:
 	return state in ["ride", "home", "approach", "land", "roll"]
 
@@ -156,7 +247,7 @@ func roll_out() -> void:
 	await _taxi_to(runway_a, 3.5)
 	await _turn_to((runway_b - runway_a).normalized())
 	in_hangar = false
-	if hangar_door.is_valid():
+	if hangar_door.is_valid() and auto_door:
 		hangar_door.call(false)
 	state = "rest"
 	_idle_engine = true
@@ -422,6 +513,6 @@ func _finish_home() -> void:
 	speed = 0.0
 	in_hangar = true
 	state = "rest"
-	if hangar_door.is_valid():
+	if hangar_door.is_valid() and auto_door:
 		hangar_door.call(false)
 	landed.emit()

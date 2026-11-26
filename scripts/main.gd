@@ -657,8 +657,15 @@ func _tap_object(kind: String) -> void:
 				_nika_house_leave()
 			else:
 				leave_house()
+		"hangar_btn":
+			if _ctl_girl:
+				_nika_btn_go(hit_area)
+			else:
+				hud.toast("Кнопка воріт ангара. Керуй Нікою — і вона її натисне!", 3.0)
 		"plane":
-			if plane:
+			if plane and _ctl_girl and not riding:
+				_nika_plane_go()
+			elif plane:
 				if riding:
 					plane.say("Летимо!", 1.5)
 				elif plane.state == "rest":
@@ -1520,6 +1527,7 @@ func start_ride() -> void:
 		await get_tree().create_timer(0.8).timeout
 	riding = true
 	cam_follow = null
+	plane.auto_door = true
 	beep.outdoors = true
 	beep.say("Летимо до літака!", 2.5)
 	var side: Vector3 = plane.global_position + Vector3(0, 0, 5.5)
@@ -1912,6 +1920,8 @@ func _girl_cam(delta: float) -> void:
 			_girl_follow(delta, bz.building_at(girl.global_position) if bz else null, false)
 			return
 		_gesture_t = 0.0
+		if _pressing:
+			girl._keys_abort = true
 	if mv.length() > 0.1:
 		_girl_goal = Vector3.INF
 		_goal_route = []
@@ -1946,7 +1956,13 @@ func _girl_cam(delta: float) -> void:
 	if _hand_door_busy(delta, mv.normalized() if mv.length() > 0.2 else Vector3.ZERO):
 		_girl_follow(delta, bz.building_at(girl.global_position) if bz else null, false)
 		return
+	var gp0: Vector3 = girl.global_position
 	var moved: float = girl.player_step(mv, run, delta)
+	if Game.state["location"] == "yard":
+		var gk: Vector3 = world.outer.hangar_keep(gp0, girl.global_position)
+		if gk != girl.global_position:
+			girl.global_position = gk                 # зачинені ворота ангара (і стіни) — не крізь них
+			moved = 0.0
 	if Game.state["location"] == "room":
 		_room_keep_in()
 	elif not _door_busy and mv.length() > 0.3 and _girl_goal == Vector3.INF and world.portal_shift != Vector3.ZERO:
@@ -3994,10 +4010,153 @@ func _meet_arrive() -> void:
 			var sd := _seller_dict(node, area)
 			if not sd.is_empty():
 				_shop_open(sd)
+		"hangar_btn":
+			_nika_press_btn()
+		"plane_board":
+			_nika_board_plane()
 		_:
 			if node == null or not is_instance_valid(node):
 				return
 			_nika_greet(kind, node)
+
+
+# ------------------------------------------------------------------ ангар: кнопка воріт і Ніка сама сідає в літак
+var _pressing := false
+
+
+func _nika_meet_route(kind: String, node: Node3D, area, wp: Array, r := 0.3) -> void:
+	_meet = {"kind": kind, "node": node, "area": area, "r": r}
+	_furn = null
+	_girl_stuck = 0.0
+	_goal_route = _girl_route_to(wp[0]) + wp.slice(1)
+	_girl_goal = _goal_route.pop_front()
+
+
+func _hangar_around(a: Vector2) -> Array:
+	## Ніка надворі біля ангара — обходить його збоку до воріт.
+	var o = world.outer
+	var HX: float = o.HANGAR_HX
+	var cz: float = -o.HANGAR_HZ - 1.7 if a.y < 0.0 else o.HANGAR_HZ + 1.7
+	var wp: Array = []
+	if a.x > -HX - 0.5 and absf(a.y) < 12.0:
+		wp.append(o.air_world(maxf(a.x, -HX), cz))
+		wp.append(o.air_world(-HX - 2.0, cz))
+	return wp
+
+
+func _nika_btn_go(area) -> void:
+	## Ніка йде до кнопки на задній стіні ангара (зсередини чи ззовні — з того боку, де вона є).
+	var o = world.outer
+	var side := float(area.get_meta("side")) if area and area.has_meta("side") else -1.0
+	var inside: bool = o.in_hangar(girl.global_position)
+	if not o.hangar_open:
+		side = -1.0 if inside else 1.0
+	var HX: float = o.HANGAR_HX
+	var HZ: float = o.HANGAR_HZ
+	var BZ: float = o.HANGAR_BTN_Z
+	var a: Vector2 = o.air_local(girl.global_position)
+	var wp: Array = []
+	if side < 0.0:
+		if not inside:
+			wp.append_array(_hangar_around(a))
+			wp.append(o.air_world(-HX - 2.5, BZ))
+			wp.append(o.air_world(-HX + 1.0, BZ))
+		wp.append(o.air_world(HX - 1.15, BZ))
+	else:
+		if inside:
+			wp.append(o.air_world(-HX + 1.0, BZ))
+			wp.append(o.air_world(-HX - 2.5, BZ))
+			a = Vector2(-HX - 2.5, BZ)
+		if a.x < HX + 0.5:
+			if a.y > HZ:
+				wp.append(o.air_world(HX + 2.0, HZ + 1.7))
+			else:
+				if a.x < -HX:
+					wp.append(o.air_world(-HX - 2.0, -HZ - 1.7))
+				wp.append(o.air_world(HX + 2.0, -HZ - 1.7))
+		wp.append(o.air_world(HX + 1.15, BZ))
+	girl.say("Натисну кнопку воріт!", 1.8)
+	_nika_meet_route("hangar_btn", area.get_parent() if area else null, area, wp)
+
+
+func _nika_press_btn() -> void:
+	var o = world.outer
+	var gp: Vector3 = girl.global_position
+	var a: Vector2 = o.air_local(gp)
+	var side := -1.0 if o.in_hangar(gp) else 1.0
+	if absf(a.y - o.HANGAR_BTN_Z) > 1.3 or absf(a.x - (o.HANGAR_HX + side * 1.15)) > 1.3:
+		girl.say("Не дотягнуся до кнопки…", 2.0)
+		return
+	if plane and (riding or plane.state == "taxi"):
+		return
+	_pressing = true
+	_gesture_t = 4.0
+	var b := Vector3(o.HANGAR_HX + side * 0.09, 1.0, o.HANGAR_BTN_Z)
+	await girl.press_button(o.hangar_node, b, side, func(): o.press_hangar_btn(side))
+	var aborted: bool = girl._keys_abort
+	_pressing = false
+	if aborted:
+		return
+	_gesture_t = 0.0
+	if _ctl_girl:
+		girl.say("Ворота відчиняються!" if o.hangar_open else "Ворота зачиняються!", 2.0)
+
+
+func _nika_plane_go() -> void:
+	## Торкнулась літака — Ніка йде до нього (в ангарі — крізь відчинені ворота) і сама залазить у кабіну.
+	if plane.state != "rest":
+		plane.poke()
+		return
+	var o = world.outer
+	if plane.in_hangar and not o.hangar_open:
+		girl.say("Ворота ангара зачинені! Натисну кнопку на задній стіні.", 3.0)
+		return
+	var b: Vector3 = plane.to_global(plane.climb_frame()["ground"])
+	b.y = 0.0
+	var wp: Array = []
+	if plane.in_hangar and not o.in_hangar(girl.global_position):
+		wp.append_array(_hangar_around(o.air_local(girl.global_position)))
+		wp.append(o.air_world(-o.HANGAR_HX - 2.5, o.HANGAR_BTN_Z))
+		wp.append(o.air_world(-o.HANGAR_HX + 1.0, o.HANGAR_BTN_Z))
+	wp.append(b)
+	girl.say("Іду до літака!", 1.8)
+	_nika_meet_route("plane_board", plane, null, wp)
+
+
+func _nika_board_plane() -> void:
+	if plane == null or riding or plane.state != "rest" or not _ctl_girl:
+		return
+	if plane.in_hangar and not world.outer.hangar_open:
+		girl.say("Ворота зачинені — спершу кнопка на задній стіні!", 2.5)
+		return
+	var b: Vector3 = plane.to_global(plane.climb_frame()["ground"])
+	if Vector2(girl.global_position.x - b.x, girl.global_position.z - b.z).length() > 2.5:
+		girl.say("Не можу підійти до літака…", 2.0)
+		return
+	stop_girl_control(true)
+	riding = true
+	cam_follow = null
+	plane.auto_door = false
+	_track = girl
+	rig.glide_to(6.5, -14.0)
+	girl.say("Сідаю за штурвал!", 2.0)
+	await girl.board_plane(plane)
+	if not riding:
+		return
+	plane.rider = girl
+	_track = plane
+	plane.say("Р-р-р-р! Мотор працює!", 2.0)
+	girl.say("Лечу-у-у!", 2.0)
+	await get_tree().create_timer(0.8).timeout
+	if not riding:
+		return
+	_track = null
+	hud.show_flight(true)
+	hud.flight.home_text = "В ангар"
+	hud.flight.land_text = "Сісти"
+	hud.toast("Джойстик — кермо, ▲▼ — висота", 4.0)
+	rig.glide_to(12.0, -12.0)
+	await plane.take_off(true)
 
 
 func _girl_face(p: Vector3) -> void:

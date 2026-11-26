@@ -70,9 +70,29 @@ func board_plane(p: Node3D) -> void:
 	## Підбігає до літака й залазить у кабіну.
 	cancel_job()
 	busy = false
-	var side: Vector3 = p.to_global(Vector3(-2.6, 0, 0.4))
+	var cf: Dictionary = p.climb_frame() if p.has_method("climb_frame") else {}
+	var side: Vector3 = p.to_global(cf.get("ground", Vector3(-2.6, 0, 0.4)))
 	var id := begin_job("plane")
-	await go(side, true)
+	if Vector2(global_position.x - side.x, global_position.z - side.z).length() > 0.5:
+		await go(side, true)
+	if cf.get("wing", false):
+		# як справжня: ззаду крила хапається за край, ставить ногу, вилазить на крило, іде до кабіни,
+		# тримаючись за борт, переступає в кабіну однією ногою, потім другою, повертається й сідає
+		_ride_prep(p, "plane")
+		await _play_keys(p, _plane_up_keys(p, cf))
+		if pose:
+			pose.ik = {}
+			pose.lean = 0.0
+		mount = null
+		mount_kind = ""
+		mounting = false
+		current = ""
+		play("sit")
+		on_plane = p
+		p.pilot = self
+		p.pilot_seat = PLANE_SEAT
+		end_job(id)
+		return
 	var from := global_position
 	var k := 0.0
 	play("sit")
@@ -94,6 +114,14 @@ func leave_plane(p: Node3D) -> void:
 	on_plane = null
 	p.pilot = null
 	p.pilot_seat = Vector3.ZERO
+	var cf: Dictionary = p.climb_frame() if p.has_method("climb_frame") else {}
+	if cf.get("wing", false):
+		# устає, переступає через борт на крило, іде крилом до заднього краю, присідає й зістрибує, відходить від літака
+		_ride_prep(p, "plane")
+		await _play_keys(p, _plane_down_keys(p, cf))
+		_mount_done()
+		idle_left = 4.0
+		return
 	var from := global_position
 	var to: Vector3 = p.to_global(Vector3(-2.6, 0, 0.4))
 	to.y = 0.0
@@ -109,6 +137,207 @@ func leave_plane(p: Node3D) -> void:
 	current = ""
 	play("idle")
 	idle_left = 4.0
+
+
+func _plane_pts(cf: Dictionary) -> Dictionary:
+	var sgn: float = cf["sgn"]
+	var wy: float = cf["wy"]
+	var zt: float = cf["zt"]
+	var rim: float = cf["rim"]
+	var cz: float = cf["cz"]
+	var hs := _hips_up()
+	return {"sgn": sgn, "wy": wy, "zt": zt, "rim": rim, "cz": cz, "hs": hs, "S": PLANE_SEAT,
+		"X1": sgn * 1.45, "XC": sgn * 0.85, "over": maxf(wy + hs, rim - 0.12)}
+
+
+func _plane_up_keys(p: Node3D, cf: Dictionary) -> Array:
+	var q := _plane_pts(cf)
+	var sgn: float = q["sgn"]
+	var wy: float = q["wy"]
+	var zt: float = q["zt"]
+	var rim: float = q["rim"]
+	var cz: float = q["cz"]
+	var hs: float = q["hs"]
+	var S: Vector3 = q["S"]
+	var X1: float = q["X1"]
+	var XC: float = q["XC"]
+	var ov: float = q["over"]
+	var ank := ANK
+	var yin := -sgn * PI / 2.0                     # обличчям до кабіни
+	var G := p.to_local(global_position)
+	var A := Vector3(X1, 0, zt - 0.42)
+	var t1 := clampf(Vector2(A.x - G.x, A.z - G.z).length() / 1.4, 0.3, 2.5)
+	var y0 := atan2(A.x - G.x, A.z - G.z) if Vector2(A.x - G.x, A.z - G.z).length() > 0.1 else 0.0
+	var gnd := {"LeftFoot": [Vector3(X1 + 0.09, ank, A.z), 1.0], "RightFoot": [Vector3(X1 - 0.09, ank, A.z), 1.0]}
+	var edge := {"LeftHand": [Vector3(X1 + 0.2, wy + 0.04, zt + 0.1), 1.0], "RightHand": [Vector3(X1 - 0.2, wy + 0.04, zt + 0.1), 1.0]}
+	var on_w := func(x: float, z: float, l: Vector3, r: Vector3) -> Dictionary:
+		return {"LeftFoot": [Vector3(x, wy + ank, z) + l, 1.0], "RightFoot": [Vector3(x, wy + ank, z) + r, 1.0]}
+	var rim_h := {"LeftHand": [Vector3(sgn * 0.42, rim, cz + sgn * 0.22), 1.0], "RightHand": [Vector3(sgn * 0.42, rim, cz - sgn * 0.22), 1.0]}
+	var mix := func(a: Dictionary, b: Dictionary) -> Dictionary:
+		var o := a.duplicate()
+		o.merge(b, true)
+		return o
+	var lw := Vector3(sgn * 0.42, rim + 0.12, cz + sgn * 0.1)     # нога над бортом
+	var rw := Vector3(sgn * 0.42, rim + 0.12, cz - sgn * 0.1)
+	var li := Vector3(sgn * 0.1, S.y + ank, cz + sgn * 0.1)       # нога в кабіні
+	var ri := Vector3(sgn * 0.1, S.y + ank, cz - sgn * 0.1)
+	var lwing := Vector3(XC, wy + ank, cz + sgn * 0.09)
+	var rwing := Vector3(XC, wy + ank, cz - sgn * 0.09)
+	var t := t1
+	var keys := [
+		{"t": 0.0, "hips": Vector3(G.x, hs, G.z), "yaw": y0, "anim": "walk", "anim_speed": 0.9},
+		{"t": t, "hips": Vector3(X1, hs, A.z), "yaw": 0.0, "anim": "idle", "ik": gnd},
+	]
+	t += 0.5
+	keys.append({"t": t, "hips": Vector3(X1, hs - 0.06, zt - 0.34), "yaw": 0.0, "lean": 0.35,
+		"ik": mix.call(edge, {"LeftFoot": gnd["LeftFoot"], "RightFoot": [Vector3(X1 - 0.09, wy * 0.55 + ank, zt - 0.2), 1.0]})})
+	t += 0.5
+	keys.append({"t": t, "hips": Vector3(X1, hs - 0.04 + wy * 0.35, zt - 0.22), "yaw": 0.0, "lean": 0.45,
+		"ik": mix.call(edge, {"LeftFoot": gnd["LeftFoot"], "RightFoot": [Vector3(X1 - 0.09, wy + ank, zt + 0.15), 1.0]})})
+	t += 0.6
+	keys.append({"t": t, "hips": Vector3(X1, wy + hs - 0.14, zt + 0.08), "yaw": 0.0, "lean": 0.3,
+		"ik": mix.call(edge, on_w.call(X1, zt + 0.15, Vector3(0.09, 0, -0.03), Vector3(-0.09, 0, 0)))})
+	t += 0.5
+	keys.append({"t": t, "hips": Vector3(X1, wy + hs, zt + 0.2), "yaw": 0.0, "lean": 0.05, "anim": "walk", "anim_speed": 0.6,
+		"ik": on_w.call(X1, zt + 0.2, Vector3(0.09, 0, 0), Vector3(-0.09, 0, 0))})
+	t += clampf(Vector2(XC - X1, cz - zt - 0.2).length() / 0.8, 0.5, 2.0)
+	keys.append({"t": t, "hips": Vector3(XC, wy + hs, cz), "yaw": yin, "lean": 0.05, "anim": "idle",
+		"ik": {"LeftFoot": [lwing, 1.0], "RightFoot": [rwing, 1.0]}})
+	t += 0.45
+	keys.append({"t": t, "hips": Vector3(sgn * 0.78, wy + hs - 0.03, cz), "yaw": yin, "lean": 0.25,
+		"ik": mix.call(rim_h, {"LeftFoot": [lwing, 1.0], "RightFoot": [rwing, 1.0]})})
+	t += 0.5
+	keys.append({"t": t, "hips": Vector3(sgn * 0.65, ov, cz), "yaw": yin, "lean": 0.3,
+		"ik": mix.call(rim_h, {"LeftFoot": [lwing, 1.0], "RightFoot": [rw, 1.0]})})
+	t += 0.45
+	keys.append({"t": t, "hips": Vector3(sgn * 0.45, ov, cz), "yaw": yin, "lean": 0.25,
+		"ik": mix.call(rim_h, {"LeftFoot": [lwing, 1.0], "RightFoot": [ri, 1.0]})})
+	t += 0.5
+	keys.append({"t": t, "hips": Vector3(sgn * 0.3, maxf(S.y + hs, ov), cz), "yaw": yin, "lean": 0.2,
+		"ik": mix.call(rim_h, {"LeftFoot": [lw, 1.0], "RightFoot": [ri, 1.0]})})
+	t += 0.45
+	keys.append({"t": t, "hips": Vector3(sgn * 0.12, S.y + hs, cz), "yaw": yin, "lean": 0.1,
+		"ik": mix.call(rim_h, {"LeftFoot": [li, 1.0], "RightFoot": [ri, 1.0]})})
+	t += 0.6
+	keys.append({"t": t, "hips": Vector3(0, S.y + hs, S.z), "yaw": 0.0, "lean": 0.1, "anim": "sit",
+		"ik": {"LeftFoot": [Vector3(0.09, S.y + ank, S.z), 1.0], "RightFoot": [Vector3(-0.09, S.y + ank, S.z), 1.0],
+			"LeftHand": [Vector3(0.42, rim, S.z), 0.8], "RightHand": [Vector3(-0.42, rim, S.z), 0.8]}})
+	t += 0.7
+	keys.append({"t": t, "hips": Vector3(0, S.y + 0.12, S.z), "yaw": 0.0, "lean": 0.0,
+		"ik": {"LeftFoot": [Vector3(0.09, S.y + ank, S.z), 0.0], "RightFoot": [Vector3(-0.09, S.y + ank, S.z), 0.0],
+			"LeftHand": [Vector3(0.42, rim, S.z), 0.0], "RightHand": [Vector3(-0.42, rim, S.z), 0.0]}})
+	return keys
+
+
+func _plane_down_keys(p: Node3D, cf: Dictionary) -> Array:
+	var q := _plane_pts(cf)
+	var sgn: float = q["sgn"]
+	var wy: float = q["wy"]
+	var zt: float = q["zt"]
+	var rim: float = q["rim"]
+	var cz: float = q["cz"]
+	var hs: float = q["hs"]
+	var S: Vector3 = q["S"]
+	var X1: float = q["X1"]
+	var XC: float = q["XC"]
+	var ov: float = q["over"]
+	var ank := ANK
+	var yout := sgn * PI / 2.0                     # обличчям назовні (до крила)
+	var B: Vector3 = cf["ground"]
+	var inside := {"LeftFoot": [Vector3(0.09, S.y + ank, S.z), 1.0], "RightFoot": [Vector3(-0.09, S.y + ank, S.z), 1.0]}
+	var rim_f := {"LeftHand": [Vector3(0.42, rim, S.z), 1.0], "RightHand": [Vector3(-0.42, rim, S.z), 1.0]}
+	var rim_o := {"LeftHand": [Vector3(sgn * 0.42, rim, cz - sgn * 0.22), 1.0], "RightHand": [Vector3(sgn * 0.42, rim, cz + sgn * 0.22), 1.0]}
+	var mix := func(a: Dictionary, b: Dictionary) -> Dictionary:
+		var o := a.duplicate()
+		o.merge(b, true)
+		return o
+	var li := Vector3(sgn * 0.1, S.y + ank, cz - sgn * 0.1)
+	var ri := Vector3(sgn * 0.1, S.y + ank, cz + sgn * 0.1)
+	var lw := Vector3(sgn * 0.42, rim + 0.12, cz - sgn * 0.1)
+	var rw := Vector3(sgn * 0.42, rim + 0.12, cz + sgn * 0.1)
+	var lwing := Vector3(XC, wy + ank, cz - sgn * 0.09)
+	var rwing := Vector3(XC, wy + ank, cz + sgn * 0.09)
+	var ez := zt + 0.3
+	var gz := zt - 0.5
+	var keys := [
+		{"t": 0.0, "hips": Vector3(0, S.y + 0.12, S.z), "yaw": 0.0, "lean": 0.0, "anim": "idle",
+			"ik": {"LeftFoot": [inside["LeftFoot"][0], 0.0], "RightFoot": [inside["RightFoot"][0], 0.0]}},
+		{"t": 0.8, "hips": Vector3(0, S.y + hs, S.z), "yaw": 0.0, "lean": 0.1, "ik": mix.call(rim_f, inside)},
+		{"t": 1.4, "hips": Vector3(sgn * 0.12, S.y + hs, cz), "yaw": yout, "lean": 0.1,
+			"ik": mix.call(rim_o, {"LeftFoot": [li, 1.0], "RightFoot": [ri, 1.0]})},
+		{"t": 1.95, "hips": Vector3(sgn * 0.3, maxf(S.y + hs, ov), cz), "yaw": yout, "lean": 0.2,
+			"ik": mix.call(rim_o, {"LeftFoot": [li, 1.0], "RightFoot": [rw, 1.0]})},
+		{"t": 2.45, "hips": Vector3(sgn * 0.5, ov, cz), "yaw": yout, "lean": 0.25,
+			"ik": mix.call(rim_o, {"LeftFoot": [li, 1.0], "RightFoot": [rwing, 1.0]})},
+		{"t": 2.95, "hips": Vector3(sgn * 0.7, ov, cz), "yaw": yout, "lean": 0.25,
+			"ik": mix.call(rim_o, {"LeftFoot": [lw, 1.0], "RightFoot": [rwing, 1.0]})},
+		{"t": 3.45, "hips": Vector3(XC, wy + hs, cz), "yaw": yout, "lean": 0.05, "anim": "walk", "anim_speed": 0.6,
+			"ik": {"LeftFoot": [lwing, 1.0], "RightFoot": [rwing, 1.0], "LeftHand": [rim_o["LeftHand"][0], 0.0], "RightHand": [rim_o["RightHand"][0], 0.0]}},
+	]
+	var t := 3.45 + clampf(Vector2(X1 - XC, ez - cz).length() / 0.8, 0.5, 2.0)
+	keys.append({"t": t, "hips": Vector3(X1, wy + hs, ez), "yaw": PI, "lean": 0.05, "anim": "idle",
+		"ik": {"LeftFoot": [Vector3(X1 - 0.09, wy + ank, ez), 1.0], "RightFoot": [Vector3(X1 + 0.09, wy + ank, ez), 1.0]}})
+	t += 0.5
+	keys.append({"t": t, "hips": Vector3(X1, wy + hs - 0.22, zt + 0.22), "yaw": PI, "lean": 0.35,
+		"ik": {"LeftFoot": [Vector3(X1 - 0.09, wy + ank, zt + 0.16), 1.0], "RightFoot": [Vector3(X1 + 0.09, wy + ank, zt + 0.16), 1.0]}})
+	t += 0.3
+	keys.append({"t": t, "hips": Vector3(X1, wy * 0.6 + hs + 0.12, zt - 0.2), "yaw": PI, "lean": 0.1,
+		"ik": {"LeftFoot": [Vector3(X1 - 0.09, wy * 0.5, zt - 0.25), 0.3], "RightFoot": [Vector3(X1 + 0.09, wy * 0.5, zt - 0.25), 0.3]}})
+	t += 0.3
+	keys.append({"t": t, "hips": Vector3(X1, hs - 0.15, gz), "yaw": PI, "lean": 0.3,
+		"ik": {"LeftFoot": [Vector3(X1 - 0.09, ank, gz), 1.0], "RightFoot": [Vector3(X1 + 0.09, ank, gz), 1.0]}})
+	t += 0.4
+	var yb := atan2(B.x - X1, B.z - gz)
+	keys.append({"t": t, "hips": Vector3(X1, hs, gz), "yaw": yb, "lean": 0.0, "anim": "walk", "anim_speed": 0.9,
+		"ik": {"LeftFoot": [Vector3(X1 - 0.09, ank, gz), 0.0], "RightFoot": [Vector3(X1 + 0.09, ank, gz), 0.0]}})
+	t += clampf(Vector2(B.x - X1, B.z - gz).length() / 1.3, 0.3, 2.5)
+	keys.append({"t": t, "hips": Vector3(B.x, hs, B.z), "yaw": yb, "lean": 0.0, "anim": "idle"})
+	t += 0.15
+	keys.append({"t": t, "hips": Vector3(B.x, hs, B.z), "yaw": yb, "lean": 0.0})
+	return keys
+
+
+func press_button(t: Node3D, b: Vector3, side: float, on_press: Callable) -> void:
+	## Підходить упритул до кнопки на стіні (t — стіна, b — кнопка в її системі), тягнеться правою рукою й натискає.
+	var hs := _hips_up()
+	var G := t.to_local(global_position)
+	var yw := -side * PI / 2.0                     # обличчям до стіни
+	var st := Vector3(b.x + side * 0.42, 0, b.z + side * 0.15)
+	var d := Vector2(st.x - G.x, st.z - G.z).length()
+	var y0 := atan2(st.x - G.x, st.z - G.z) if d > 0.1 else yw
+	var feet := {"LeftFoot": [Vector3(st.x, ANK, st.z + side * 0.09), 1.0], "RightFoot": [Vector3(st.x, ANK, st.z - side * 0.09), 1.0]}
+	var hand := func(p: Vector3, w: float) -> Dictionary:
+		var o := feet.duplicate()
+		o["RightHand"] = [p, w]
+		return o
+	var t1 := clampf(d / 1.2, 0.25, 1.2)
+	var keys := [
+		{"t": 0.0, "hips": Vector3(G.x, hs, G.z), "yaw": y0, "anim": "walk" if d > 0.1 else "idle", "anim_speed": 0.7},
+		{"t": t1, "hips": Vector3(st.x, hs, st.z), "yaw": yw, "anim": "idle", "ik": feet},
+		{"t": t1 + 0.35, "hips": Vector3(st.x - side * 0.04, hs, st.z), "yaw": yw, "lean": 0.08, "ik": hand.call(Vector3(b.x + side * 0.12, b.y + 0.02, b.z), 1.0)},
+		{"t": t1 + 0.55, "hips": Vector3(st.x - side * 0.06, hs, st.z), "yaw": yw, "lean": 0.12, "ik": hand.call(Vector3(b.x + side * 0.03, b.y, b.z), 1.0)},
+		{"t": t1 + 0.7, "hips": Vector3(st.x - side * 0.06, hs, st.z), "yaw": yw, "lean": 0.12, "ik": hand.call(Vector3(b.x + side * 0.03, b.y, b.z), 1.0)},
+		{"t": t1 + 1.1, "hips": Vector3(st.x, hs, st.z), "yaw": yw, "lean": 0.0, "anim": "walk", "anim_speed": 0.5,
+			"ik": hand.call(Vector3(b.x + side * 0.2, b.y - 0.1, b.z), 0.0)},
+	]
+	if d > 0.1:
+		# відступає на крок від стіни (туди, звідки підійшла)
+		var bk := Vector3(st.x + side * 0.6, 0, st.z)
+		keys.append({"t": t1 + 1.7, "hips": Vector3(bk.x, hs, bk.z), "yaw": yw, "lean": 0.0, "anim": "idle"})
+		keys.append({"t": t1 + 1.8, "hips": Vector3(bk.x, hs, bk.z), "yaw": yw, "lean": 0.0})
+	else:
+		keys[keys.size() - 1].erase("anim")
+	var fire := func():
+		await get_tree().create_timer(t1 + 0.55).timeout
+		if not _keys_abort:
+			on_press.call()
+	fire.call()
+	await _play_keys(t, keys)
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	current = ""
+	play("idle")
 
 
 # ------------------------------------------------------------------ гравець сам керує Нікою

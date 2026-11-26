@@ -2018,6 +2018,12 @@ func _make_forest(rng: RandomNumberGenerator) -> void:
 var hangar_doors: Array = []                  # [лівий, правий]
 var _hangar_tw: Tween
 var hangar_open := false
+var hangar_node: Node3D
+var hangar_btns: Array = []                   # кнопки воріт на задній стіні (зсередини й ззовні)
+var hangar_lamps: Array = []
+const HANGAR_HX := 5.0                        # пів-довжини ангара (від центру до воріт і до задньої стіни)
+const HANGAR_HZ := 5.8                        # пів-ширини
+const HANGAR_BTN_Z := -4.2                    # де на задній стіні кнопка (збоку, щоб не заважав хвіст літака)
 
 
 static func air_local(p: Vector3) -> Vector2:
@@ -2037,6 +2043,7 @@ func _make_airfield() -> void:
 	hg.position = HANGAR
 	hg.rotation.y = AIR_ROT
 	add_child(hg)
+	hangar_node = hg
 	var metal := Util.mat(Color(0.74, 0.76, 0.72), 0.55)
 	var metal2 := Util.mat(Color(0.62, 0.66, 0.62), 0.55)
 	var roof_m := Util.mat(Color(0.58, 0.36, 0.28), 0.7)
@@ -2095,6 +2102,35 @@ func _make_airfield() -> void:
 		d.set_meta("closed_z", sgn * HZ / 2.0)
 		d.set_meta("open_z", sgn * (HZ * 1.5 + 0.3))
 		hangar_doors.append(d)
+	# кнопка воріт на задній стіні на висоті 1 м — зсередини (side −1) і ззовні (side +1)
+	var font: Font = load("res://assets/fonts/DejaVuSans-Bold.ttf")
+	for side in [-1.0, 1.0]:
+		var pn := Node3D.new()
+		pn.name = "hangar_btn_in" if side < 0.0 else "hangar_btn_out"
+		pn.position = Vector3(HX + side * 0.09, 1.0, HANGAR_BTN_Z)
+		hg.add_child(pn)
+		pn.add_child(Util.box(Vector3(0.04, 0.34, 0.24), Util.mat(Color(0.95, 0.78, 0.15), 0.5)))
+		var bt := Util.cyl(0.055, 0.055, 0.05, Util.mat(Color(0.85, 0.12, 0.1), 0.35), Vector3(side * 0.035, 0, 0), Vector3(0, 0, PI / 2.0))
+		bt.set_meta("rest_x", side * 0.035)
+		bt.set_meta("side", side)
+		pn.add_child(bt)
+		hangar_btns.append(bt)
+		var lamp := Util.box(Vector3(0.03, 0.05, 0.05), Util.mat(Color(0.9, 0.15, 0.1), 0.4, 0.0, Color(0.9, 0.15, 0.1), 1.5), Vector3(side * 0.03, 0.11, 0))
+		pn.add_child(lamp)
+		hangar_lamps.append(lamp)
+		var bl := Label3D.new()
+		bl.text = "ВОРОТА"
+		bl.font = font
+		bl.font_size = 48
+		bl.pixel_size = 0.003
+		bl.modulate = Color(0.15, 0.15, 0.15)
+		bl.outline_size = 0
+		bl.position = Vector3(side * 0.03, 0.24, 0)
+		bl.rotation.y = side * PI / 2.0
+		pn.add_child(bl)
+		var pa := Util.pick_area("hangar_btn", Vector3(0.3, 0.5, 0.5), Vector3.ZERO)
+		pa.set_meta("side", side)
+		pn.add_child(pa)
 	# колесовідбійники-перешкоди для тих, хто ходить
 	for i in 7:
 		var o := air_world(HX, -HZ + i * HZ * 2.0 / 6.0)
@@ -2233,6 +2269,45 @@ func set_hangar_door(open: bool) -> void:
 	var au = get_node_or_null("/root/Main/Audio")
 	if au and au.has_method("play_at") and hangar_doors.size() > 0:
 		au.play_at("door_open", hangar_doors[0], -4.0, 0.6)
+	var lc := Color(0.2, 0.9, 0.25) if open else Color(0.9, 0.15, 0.1)
+	for l in hangar_lamps:
+		(l as MeshInstance3D).material_override = Util.mat(lc, 0.4, 0.0, lc, 1.5)
+
+
+func press_hangar_btn(side: float) -> void:
+	## Ніка натиснула кнопку на задній стіні: ворота відчиняються (і стоять відчинені) або зачиняються.
+	for b in hangar_btns:
+		if float(b.get_meta("side")) != side:
+			continue
+		var rx: float = b.get_meta("rest_x")
+		var tw := create_tween()
+		tw.tween_property(b, "position:x", rx - side * 0.025, 0.08)
+		tw.tween_property(b, "position:x", rx, 0.15)
+	var au = get_node_or_null("/root/Main/Audio")
+	if au and au.has_method("play_at") and hangar_btns.size() > 0:
+		au.play_at("pop", hangar_btns[0], -6.0, 1.6)
+	set_hangar_door(not hangar_open)
+
+
+static func _in_hangar_l(q: Vector2) -> bool:
+	return q.x > -HANGAR_HX - 0.25 and q.x < HANGAR_HX and absf(q.y) < HANGAR_HZ
+
+
+static func in_hangar(p: Vector3) -> bool:
+	return _in_hangar_l(air_local(p))
+
+
+func hangar_keep(old: Vector3, p: Vector3) -> Vector3:
+	## У ангар і з ангара — лише крізь відчинені ворота (не крізь зачинені стулки й стіни).
+	var a := air_local(old)
+	var b := air_local(p)
+	if absf(a.x) > 9.0 or absf(a.y) > 9.0:
+		return p
+	if _in_hangar_l(a) == _in_hangar_l(b):
+		return p
+	if hangar_open and _hangar_tw == null and minf(a.x, b.x) < -HANGAR_HX + 0.8 and absf(b.y) < HANGAR_HZ - 0.3:
+		return p
+	return Vector3(old.x, p.y, old.z)
 
 
 func is_blocked(p: Vector3, r: float) -> bool:
