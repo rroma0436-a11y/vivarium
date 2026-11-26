@@ -28,7 +28,7 @@ var pies_left := 0
 const GRANNY_BOUNDS := Rect2(-60.0, -130.0, 105.0, 164.0)
 # дорога від воріт на пасовисько (та сама, якою ходить пастух)
 const PASTURE_WAY := [Vector3(-24.0, 0, 8.5), Vector3(-45.0, 0, 9.0), Vector3(-120.0, 0, 9.0), Vector3(-166.0, 0, 9.0)]  # до пасовиська на фермі за ставком
-const FARM_BOUNDS := Rect2(-200.0, -130.0, 245.0, 200.0)
+const PASTURE_BOUNDS := Rect2(-200.0, -130.0, 245.0, 200.0)
 const PAIL_H := 0.29                  # висота дійниці (без дужки)
 const PAIL_R_BOT := 0.115
 const PAIL_R_TOP := 0.145
@@ -578,6 +578,9 @@ func _house_chores(id: int) -> void:
 # ------------------------------------------------------------------ доїння
 func _pick_cow(allow_inside: bool):
 	## Корова, яку доїти: та, що пасеться ближче до дороги; якщо всі в корівнику — покличемо одну.
+	var hc = main.home_cow
+	if hc != null and hc.mode == "free" and hc.visible:
+		return hc                         # своя корова біля хати Тарасика
 	var best = null
 	var bd := INF
 	var start: Vector3 = PASTURE_WAY[PASTURE_WAY.size() - 1]
@@ -646,11 +649,17 @@ func _milk(id: int, asked: bool) -> bool:
 	cow.milk_begin()
 	if not await _go_out(id):
 		return false
-	bounds = FARM_BOUNDS
-	for wp in PASTURE_WAY:
-		await _goto(wp)
+	if cow == main.home_cow:
+		# корова біля хати Тарасика — одразу за дорогою від воріт
+		await _goto(PASTURE_WAY[0])
 		if id != job:
 			return false
+	else:
+		bounds = PASTURE_BOUNDS
+		for wp in PASTURE_WAY:
+			await _goto(wp)
+			if id != job:
+				return false
 	var t := 0.0
 	while cow.milk_walking() and t < 25.0:
 		await wait(0.5)

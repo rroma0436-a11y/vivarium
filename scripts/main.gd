@@ -1252,6 +1252,9 @@ const HORSE_PADDOCK := Rect2(-182.0, 36.0, 14.0, 36.0)   # левада пере
 const CART_PARK := Vector3(-162.0, 0, 50.0)            # де стоїть віз (східніше левади)
 const FARM_WAY := [Vector3(-24, 0, 8.5), Vector3(-45, 0, 9.0), Vector3(-120, 0, 9.0), Vector3(-166, 0, 9.0)]  # від воріт до ферми (північніше ставка, повз аеродром)
 var cows: Array = []                                  # корови + бичок
+var home_cow                                          # корова біля хати Тарасика (її доїть бабуся)
+const HOME_COW_AT := Vector3(-27.0, 0, 14.0)
+const HOME_COW_PASTURE := Rect2(-32.0, 11.0, 9.0, 7.0)
 var horse
 var horse_cart
 var extra_horses: Array = []                          # коні для масовки (horse2.glb)
@@ -1318,6 +1321,13 @@ func _spawn_cattle() -> void:
 			c.night_from = 19.8 + i * 0.08
 			c.set_meta("name", names[i])
 			cows.append(c)
+		# копія корови — пасеться біля хати Тарасика, ночує надворі
+		home_cow = preload("res://scripts/bull.gd").new()
+		world.yard_root.add_child(home_cow)
+		home_cow.setup(HOME_COW_AT, HOME_COW_AT, "cow", 1.42, HOME_COW_PASTURE)
+		home_cow.stay_out = true
+		home_cow.voices = ["Му-у-у! Я — Зорька.", "Мууу!", "Му-у! Молочко буде!"]
+		home_cow.set_meta("name", "Зорька")
 	if Models.exists("horse"):
 		horse = preload("res://scripts/bull.gd").new()
 		world.yard_root.add_child(horse)
