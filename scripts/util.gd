@@ -132,6 +132,8 @@ static func push_solids(p: Vector3, me: float, skip: Array = []) -> Vector3:
 		var own := ar.get_parent()
 		if own == null or skip.has(own) or not (own as Node3D).is_visible_in_tree():
 			continue
+		if ar.has_meta("no_solid"):
+			continue                              # зона торкання будівлі (стайня, корівник) — у неї заходять крізь двері
 		var cs := ar.get_child(0) as CollisionShape3D
 		if cs == null or not (cs.shape is BoxShape3D):
 			continue

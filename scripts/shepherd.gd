@@ -37,13 +37,35 @@ func on_arrived() -> void:
 	await _goto(Vector3(pasture.get_center().x, 0, pasture.end.y + 1.5))
 
 
+func _to_door(d: Vector3) -> void:
+	## До передніх дверей корівника (вони дивляться на захід); з пасовиська — обходом між корівниками.
+	if global_position.x > -163.0:
+		var gz := d.z + 8.0
+		await _goto(Vector3(-155.0, 0, gz))
+		await _goto(Vector3(-168.5, 0, gz))
+	await _goto(d + Vector3(-0.4, 0, 0), 0.8)
+
+
 func herd_out() -> void:
-	## Відчиняє задні ворота корівників і виганяє худобу на пасовисько.
-	await _to_back_gate()
-	say("Виходьте, мої красуні, — на пасовисько!", 2.5)
-	await act("talk", 2.5)
-	for c in main.cows:
-		if c.mode == "inside" or c.mode == "to_shed":
+	## Обходить корівники: заходить крізь двері, кличе худобу — і вона виходить за ним крізь двері на пасовисько.
+	var first := true
+	for d in main.COW_DOORS:
+		var inside: Array = []
+		for c in main.cows:
+			if (c.mode == "inside" or c.mode == "to_shed") and (c.door as Vector3).distance_to(d) < 2.0:
+				inside.append(c)
+		if inside.is_empty():
+			continue
+		await _to_door(d)
+		await go(d + Vector3(2.6, 0, 0), false, false)          # заходить у корівник
+		face(d + Vector3(5.0, 0, 0))
+		say("Виходьте, мої красуні, — на пасовисько!" if first else "Ходіть, ходіть надвір!", 2.5)
+		first = false
+		await act("talk", 2.0)
+		await go(d, false, false)                                # виходить крізь двері
+		await go(d + Vector3(-1.5, 0, -1.8), false, false)       # і стає збоку, щоб не заважати
+		face(d)
+		for c in inside:
 			c.send_out()
 			await wait(0.9)
 
@@ -53,7 +75,9 @@ func herd_in() -> void:
 	await _goto(Vector3(pasture.get_center().x, 0, pasture.get_center().y))
 	say("Додому, корівки, у корівник!", 2.5)
 	await act("talk", 2.0)
-	await _to_back_gate()
+	await _to_door(door)
+	await go(door + Vector3(-1.5, 0, -1.8), false, false)
+	face(door)
 	for c in main.cows:
 		if c.mode != "inside" and c.mode != "hitched" and c.mode != "milking":
 			c.kept_in = true

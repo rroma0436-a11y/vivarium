@@ -127,10 +127,13 @@ func _process(delta: float) -> void:
 		if night:
 			kept_in = false
 		if not night and not kept_in and (not keeper_only or Game.hour() >= 10.0):
-			mode = "free"
-			visible = true
-			position = _out_door()
-			_target = position + (Vector3(2.5, 0, randf_range(-2, 2)) if back_door != Vector3.ZERO else Vector3(randf_range(-2, 2), 0, 2.5))
+			if back_door == Vector3.ZERO:
+				_go_out(_pasture_point())
+			else:
+				mode = "free"
+				visible = true
+				position = _out_door()
+				_target = position + Vector3(2.5, 0, randf_range(-2, 2))
 			say("Му-у! Доброго ранку!", 2.5)
 		return
 	if night and (mode == "free" or mode == "to_pasture"):
@@ -161,6 +164,9 @@ func _process(delta: float) -> void:
 		mode = "inside"
 		visible = false
 		speed_k = 1.0
+		return
+	if mode == "to_pasture" and _path.size() > 0:
+		_target = _path.pop_front()
 		return
 	if mode == "to_pasture":
 		mode = "free"
@@ -211,7 +217,32 @@ func send_home(fast := false) -> void:
 		_path = [back_door + Vector3(-3.0, 0, 0)]
 		_target = back_door
 		return
-	_path = [door + door_in]
+	# з пасовиська — обходом навколо будівлі до передніх дверей, крізь них — усередину
+	var via: Array = []
+	if not yard_way.is_empty() and position.distance_to(yard_way.back()) < position.distance_to(door):
+		via = yard_way.duplicate()
+		via.reverse()
+	_path = via + [door, door + door_in]
+	_target = _path.pop_front()
+
+
+var yard_way: Array = []                # від передніх дверей надвір — обхід будівлі до пасовиська (порожньо — одразу)
+
+
+func _pasture_point() -> Vector3:
+	return Vector3(randf_range(pasture.position.x, pasture.end.x), 0, randf_range(pasture.position.y, pasture.end.y))
+
+
+func _go_out(final: Vector3) -> void:
+	## З корівника чи стайні — крізь передні двері (вони відчиняються, коли тварина підходить), далі — куди треба.
+	visible = true
+	position = door + door_in
+	rotation.y = atan2(-door_in.x, -door_in.z)
+	_yaw_v = 0.0
+	mode = "to_pasture"
+	_graze = 0.0
+	_busy = 0.0
+	_path = yard_way + [final]
 	_target = door
 
 
@@ -362,12 +393,16 @@ func send_out(fast := false) -> void:
 	if mode == "milking":
 		return
 	kept_in = false
+	speed_k = 2.0 if fast else 1.0
+	if mode == "inside" and back_door == Vector3.ZERO:
+		_go_out(_pasture_point())
+		return
 	if mode == "inside":
 		visible = true
 		position = _out_door()
 	mode = "to_pasture"
-	speed_k = 2.0 if fast else 1.0
-	_target = Vector3(randf_range(pasture.position.x, pasture.end.x), 0, randf_range(pasture.position.y, pasture.end.y))
+	_path = []
+	_target = _pasture_point()
 
 
 # ------------------------------------------------------------------ доїння (бабуся Галя з дійницею)

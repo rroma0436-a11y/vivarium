@@ -1236,6 +1236,12 @@ var horse_cart
 var extra_horses: Array = []                          # коні для масовки (horse2.glb)
 
 
+func _cow_way(d: Vector3) -> Array:
+	## Від передніх дверей корівника (дивляться на захід) — обходом між корівниками на пасовисько за ними.
+	var gz := d.z + 8.0
+	return [Vector3(-168.5, 0, gz), Vector3(-155.0, 0, gz)]
+
+
 func _spawn_cattle() -> void:
 	## Бичок і п'ять корів (пасуться за корівником, на ніч — у корівник), кінь — у стайні.
 	var rng := RandomNumberGenerator.new()
@@ -1245,7 +1251,7 @@ func _spawn_cattle() -> void:
 		world.yard_root.add_child(bull)
 		bull.setup(Vector3(-145.0, 0, 65.0), COW_DOORS[0], "bull", 1.55, COW_PASTURE)
 		bull.door_in = Vector3(3.0, 0, 0)
-		bull.back_door = COW_DOORS[0] + COW_BACK
+		bull.yard_way = _cow_way(COW_DOORS[0])
 		cows.append(bull)
 	if Models.exists("cow"):
 		var names := ["Зірка", "Ласка", "Квітка", "Красуля", "Мілка"]
@@ -1254,7 +1260,7 @@ func _spawn_cattle() -> void:
 			world.yard_root.add_child(c)
 			c.setup(Vector3(rng.randf_range(-151.0, -133.0), 0, rng.randf_range(58.0, 73.0)), COW_DOORS[(i + 1) % COW_DOORS.size()], "cow", rng.randf_range(1.35, 1.5), COW_PASTURE)
 			c.door_in = Vector3(3.0, 0, rng.randf_range(-0.6, 0.6))
-			c.back_door = COW_DOORS[(i + 1) % COW_DOORS.size()] + COW_BACK + Vector3(0, 0, rng.randf_range(-0.6, 0.6))
+			c.yard_way = _cow_way(COW_DOORS[(i + 1) % COW_DOORS.size()])
 			c.voices = ["Му-у-у! Я — %s." % names[i], "Мууу!", "Му-у! Молочко буде!"]
 			c.night_from = 19.8 + i * 0.08
 			c.set_meta("name", names[i])

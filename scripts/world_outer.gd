@@ -290,7 +290,9 @@ func _make_farm_buildings() -> void:
 		m.rotation.y = b[3]
 		_obst.append([m.position.x, m.position.z, 4.6, 3.0])
 		houses.append([m.position.x, m.position.z])
-		m.add_child(Util.pick_area("barn", Vector3(8.0, 5.0, 7.0), Vector3(0, 2.5, 0)))
+		var pa := Util.pick_area("barn", Vector3(8.0, 5.0, 7.0), Vector3(0, 2.5, 0))
+		pa.set_meta("no_solid", true)             # Ніка й працівники заходять усередину крізь двері
+		m.add_child(pa)
 		# двері (у моделі вони дивляться вздовж +X) — вирізаємо й ставимо на петлю
 		var mis := m.find_children("*", "MeshInstance3D", true, false)
 		if not mis.is_empty():

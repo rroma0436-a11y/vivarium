@@ -67,10 +67,14 @@ func horses_out() -> void:
 		if inside.is_empty():
 			continue
 		await _goto(d + Vector3(1.6, 0, 0))
-		face(d + Vector3(-3, 0, 0))
+		await go(d + Vector3(-2.4, 0, 0), false, false)          # заходить у стайню крізь двері
+		face(d + Vector3(-5.0, 0, 0))
 		say("Доброго ранку, коні! Ідіть пастися!" if first else "Виходь, красеню, на траву!", 2.5)
 		first = false
 		await act("wave", 2.0)
+		await go(d + Vector3(1.6, 0, 0), false, false)           # виходить надвір
+		await go(d + Vector3(1.8, 0, 2.2), false, false)         # і стає збоку від дверей
+		face(d)
 		for h in inside:
 			h.send_out()
 			await wait(0.8)
