@@ -2687,6 +2687,7 @@ func _trip_abort() -> void:
 		_line.visible = false
 	if _bobber:
 		_bobber.visible = false
+	_sowing = false
 	if _seed_fx:
 		_seed_fx.emitting = false
 	var m := _main()
@@ -3200,7 +3201,11 @@ func _mill_trip(id: int, cart: Node3D, h: Node3D) -> void:
 
 
 # ---------------- сіяти пшеницю
-func _seed(on: bool) -> void:
+var _sowing := false
+
+
+func _throw_seeds(at: Vector3, dir: Vector3) -> void:
+	## Жменя зерна широким віялом.
 	if _seed_fx == null:
 		_seed_fx = CPUParticles3D.new()
 		var sm := SphereMesh.new()
@@ -3210,17 +3215,53 @@ func _seed(on: bool) -> void:
 		sm.rings = 2
 		sm.material = Util.mat(Color(0.92, 0.8, 0.4), 0.6)
 		_seed_fx.mesh = sm
-		_seed_fx.amount = 40
-		_seed_fx.lifetime = 0.9
-		_seed_fx.direction = Vector3(0.6, 0.6, 1.0)
-		_seed_fx.spread = 35.0
-		_seed_fx.initial_velocity_min = 1.8
-		_seed_fx.initial_velocity_max = 3.0
+		_seed_fx.amount = 120
+		_seed_fx.lifetime = 1.1
+		_seed_fx.one_shot = true
+		_seed_fx.explosiveness = 0.8
+		_seed_fx.spread = 28.0
+		_seed_fx.initial_velocity_min = 2.2
+		_seed_fx.initial_velocity_max = 4.6
 		_seed_fx.gravity = Vector3(0, -9.8, 0)
 		_seed_fx.local_coords = false
-		_seed_fx.position = Vector3(0.3, 1.1, 0.3)
-		add_child(_seed_fx)
-	_seed_fx.emitting = on
+		world.yard_root.add_child(_seed_fx)
+	_seed_fx.global_position = at
+	_seed_fx.direction = dir.normalized()
+	_seed_fx.restart()
+	_seed_fx.emitting = true
+
+
+func _sow_arms(bucket: Node3D) -> void:
+	## Як сіяч: відро — під лівою рукою біля пояса, права бере жменю зерна й широким помахом розкидає.
+	var cyc := 0.0
+	var thrown := false
+	while _sowing and is_instance_valid(bucket) and is_inside_tree():
+		cyc = fmod(cyc + get_process_delta_time() / 1.4, 1.0)
+		var f := Vector3(sin(rotation.y), 0, cos(rotation.y))
+		var lft := Vector3(cos(rotation.y), 0, -sin(rotation.y))
+		var base := global_position
+		var bpos := base + lft * 0.2 + f * 0.3 + Vector3(0, 0.78, 0)
+		bucket.global_transform = Transform3D(Basis(Vector3.UP, rotation.y), bpos)
+		var dip := bpos + Vector3(0, 0.3, 0)
+		var front := base + f * 0.6 + Vector3(0, 1.15, 0)
+		var out := base + f * 0.45 - lft * 0.7 + Vector3(0, 1.3, 0)
+		var rh: Vector3
+		if cyc < 0.3:
+			rh = out.lerp(dip, smoothstep(0.0, 1.0, cyc / 0.3))               # рука — назад до відра
+		elif cyc < 0.45:
+			rh = dip + Vector3(0, sin(cyc * 60.0) * 0.03, 0)                  # набирає жменю
+			thrown = false
+		else:
+			var k := smoothstep(0.0, 1.0, (cyc - 0.45) / 0.55)
+			rh = dip.lerp(front, k).lerp(front.lerp(out, k), k)               # широкий помах
+			if cyc > 0.7 and not thrown:
+				thrown = true
+				_throw_seeds(hand.global_position if hand else rh, (out - front).normalized() + f * 0.6 + Vector3(0, 0.35, 0))
+		if pose:
+			pose.ik = {"LeftHand": [bpos + lft * 0.16 + Vector3(0, 0.14, 0), 1.0], "RightHand": [rh, 1.0]}
+		await get_tree().process_frame
+	if pose:
+		pose.ik = {}
 
 
 func _sow_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
@@ -3285,19 +3326,25 @@ func _sow_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
 	if id != job:
 		return
 	say("Сію-вію, посіваю!", 3.0)
-	_seed(true)
+	_drop_carry()
+	world.yard_root.add_child(bucket)
+	_sowing = true
+	_sow_arms(bucket)
 	var east := true
-	for z in [f.position.y + 3.0, f.position.y + 9.0, f.position.y + 15.0]:
+	var z := f.position.y + 2.0
+	while z < f.end.y - 0.5:
 		await go(Vector3(f.position.x + 1.0 if east else f.end.x - 1.0, 0, z))
 		if id != job:
-			_seed(false)
+			_sowing = false
 			return
 		await go(Vector3(f.end.x - 1.0 if east else f.position.x + 1.0, 0, z))
 		if id != job:
-			_seed(false)
+			_sowing = false
 			return
 		east = not east
-	_seed(false)
+		z += 3.0
+	_sowing = false
+	await get_tree().process_frame
 	if fill:
 		for ch in fill.get_children():
 			ch.queue_free()
