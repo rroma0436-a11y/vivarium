@@ -59,6 +59,7 @@ func setup_seats() -> void:
 		"armchair": [R + Vector3(-2.79, 0, -0.2), deg_to_rad(90.0), true, _jug("room_jug"), 0.16],
 	}
 	_make_blanket()
+	_make_trip_props()
 
 
 func _jug(key: String) -> Node3D:
@@ -87,6 +88,10 @@ func _process(delta: float) -> void:
 				bubble.visible = false
 		return
 	_physics_step(delta)
+	if seated == "" and not lying and not Util.pier.is_empty() and Util.on_pier(global_position, 0.35):
+		global_position.y = Util.pier_y(global_position)      # по причалу — по настилу
+	if _rod_hand:
+		_rod_step()
 	if _act_left > 0.0:
 		_act_left -= delta
 		if _act_left <= 0.0:
@@ -1460,6 +1465,8 @@ func _walk_from_garden(id: int) -> bool:
 func cancel_job() -> void:
 	if behind_plow:
 		_garden_abort()
+	if _trip != "":
+		_trip_abort()
 	super()
 
 
@@ -2137,3 +2144,1128 @@ func forest_job() -> void:
 		return
 	drop_basket()
 	end_job(id)
+
+
+# ------------------------------------------------------------------ «Іду почитаю»
+func read_job() -> void:
+	## У хату, у крісло — і за книжку.
+	if at_home and seated == "armchair" and doing != "sleep" and not lying:
+		say("Я вже читаю, онучку!", 2.0)
+		return
+	say("Піду почитаю книжку.", 2.5)
+	bed_now = false
+	cancel_job()
+	if seated != "":
+		var id0 := begin_job("stand")
+		await stand_up()
+		end_job(id0)
+	if lying:
+		_wake_reset()
+	var id := begin_job("home")
+	if not at_home:
+		if not await _walk_in(id):
+			return
+	end_job(id)
+	sit_job("armchair", 90.0)
+
+
+# ------------------------------------------------------------------ поїздки возом від садка (меню дідуся)
+const TRIP_BOUNDS := Rect2(-235.0, -140.0, 385.0, 350.0)
+const CART_SLOTS := [Vector3(0.25, 0.56, -0.45), Vector3(-0.25, 0.56, -0.5), Vector3(0.22, 0.56, -1.0), Vector3(-0.22, 0.56, -1.0)]
+const ROD_IN_CART := Vector3(0.45, 0.62, 0.3)
+const ROD_LEN := 2.4
+const SHOP_GEAR := {"rod": Vector3(-17.1, 0, 0.05), "stool": Vector3(-16.4, 0, -0.35), "bucket": Vector3(-15.8, 0, -0.4)}
+const SHOP_STAND := Vector3(-15.2, 0, -1.1)              # де стати в майстерні, щоб узяти вудку, стільчик, відро
+const BARN_SACKS := Vector3(-14.7, 0, -9.6)              # мішки з пшеницею в сараї, біля дверей
+const BARN_REACH := Vector3(-15.0, 0, -8.5)
+const GATE_STOP := Vector3(4.0, 0, 10.2)                 # віз біля воріт подвір'я
+const TO_WEST := [Vector3(23.3, 0, 8.0), Vector3(14.0, 0, 9.6)]
+const TO_EAST := [Vector3(23.3, 0, 8.0), Vector3(26.0, 0, 5.6)]
+const VILLAGE_DOWN := [Vector3(3.0, 0, 10.5), Vector3(2.5, 0, 30.0), Vector3(5.5, 0, 50.0), Vector3(5.5, 0, 68.0), Vector3(2.2, 0, 82.0)]
+const VILLAGE_UP := [Vector3(5.5, 0, 68.0), Vector3(5.5, 0, 50.0), Vector3(2.5, 0, 30.0), Vector3(3.0, 0, 12.0),
+	Vector3(14.0, 0, 9.6), Vector3(22.0, 0, 6.5)]
+const POND_ROAD_HOME := [Vector3(-2.0, 0, 29.0), Vector3(2.5, 0, 18.0), Vector3(8.0, 0, 11.0), Vector3(14.0, 0, 9.6), Vector3(22.0, 0, 6.5)]
+const NORTH_HOME := [Vector3(-160.0, 0, 9.5), Vector3(-120.0, 0, 9.5), Vector3(-45.0, 0, 10.0), Vector3(-24.0, 0, 10.5),
+	Vector3(-5.0, 0, 11.0), Vector3(12.0, 0, 9.6), Vector3(22.0, 0, 6.5)]
+const FARM_HAY_STOP := Vector3(-172.0, 0, 34.0)
+const SHOP_ASK := {"bread": "Дайте паляницю й булочок!", "sausage": "Мені кільце ковбаски, будь ласка!", "fruit": "І яблучок для онуків!"}
+const SHOP_COL := {"bread": Color(0.85, 0.62, 0.3), "sausage": Color(0.6, 0.2, 0.15), "fruit": Color(0.85, 0.15, 0.1)}
+
+var _trip := ""
+var _cargo: Array = []         # що лежить на возі
+var _carry: Array = []         # що несе в'язкою: перше — в руці, решта — зверху
+var _gear := {}                # вудка, стільчик, відро (живуть у майстерні)
+var _rod_hand := false         # вудка в руці (ловить рибу)
+var _rod_lift := 0.0
+var _line: MeshInstance3D
+var _bobber: Node3D
+var _bob_dip := 0.0
+var _seed_fx: CPUParticles3D
+
+
+func _make_trip_props() -> void:
+	## Вудка, стільчик і відро — у майстерні; мішки з пшеницею — у сараї.
+	var root: Node3D = world.yard_root
+	var wood := Util.mat(Color(0.5, 0.36, 0.22), 0.9)
+	var rod := Node3D.new()
+	rod.name = "FishingRod"
+	rod.add_child(Util.cyl(0.006, 0.014, ROD_LEN, Util.mat(Color(0.55, 0.42, 0.25), 0.6), Vector3(0, ROD_LEN / 2.0, 0)))
+	rod.add_child(Util.cyl(0.035, 0.035, 0.03, Util.mat(Color(0.25, 0.25, 0.28), 0.4, 0.6), Vector3(0.03, 0.35, 0), Vector3(0, 0, PI / 2.0)))
+	root.add_child(rod)
+	rod.position = SHOP_GEAR["rod"]
+	rod.basis = Basis(Vector3.RIGHT, 0.12)
+	var stool := Node3D.new()
+	stool.name = "FishStool"
+	root.add_child(stool)
+	if Models.spawn(stool, "stool", 0.34) == null:
+		stool.add_child(Util.cyl(0.16, 0.16, 0.04, wood, Vector3(0, 0.32, 0)))
+		for i in 3:
+			var a := TAU * i / 3.0
+			stool.add_child(Util.cyl(0.018, 0.022, 0.31, wood, Vector3(cos(a) * 0.11, 0.155, sin(a) * 0.11)))
+	stool.position = SHOP_GEAR["stool"]
+	var bucket := _bucket()
+	root.add_child(bucket)
+	bucket.position = SHOP_GEAR["bucket"]
+	_gear = {"rod": rod, "stool": stool, "bucket": bucket}
+	for k in _gear:
+		var o: Node3D = _gear[k]
+		remember_home(o)
+		o.set_meta("to", "workshop")
+	for i in 3:
+		var sk := _sack("wheat")
+		root.add_child(sk)
+		sk.position = BARN_SACKS + (Vector3(0, 0, -0.45 * i) if i < 2 else Vector3(0.05, 0.5, -0.22))
+		sk.rotation.y = 0.4 * i
+
+
+func _bucket() -> Node3D:
+	var b := Node3D.new()
+	b.name = "Bucket"
+	var zinc := Util.mat(Color(0.62, 0.64, 0.66), 0.35, 0.7)
+	b.add_child(Util.cyl(0.15, 0.12, 0.3, zinc, Vector3(0, 0.15, 0)))
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.14
+	tm.outer_radius = 0.152
+	tm.rings = 14
+	tm.ring_segments = 4
+	var hd := MeshInstance3D.new()
+	hd.mesh = tm
+	hd.material_override = zinc
+	hd.rotation_degrees = Vector3(90, 0, 0)
+	hd.position = Vector3(0, 0.3, 0)
+	b.add_child(hd)
+	var fill := Node3D.new()
+	fill.name = "fill"
+	b.add_child(fill)
+	return b
+
+
+func _sack(kind: String) -> Node3D:
+	## Мішок: "wheat" — з пшеницею, "flour" — з борошном, "empty" — порожній.
+	var sk := Node3D.new()
+	sk.name = "Sack"
+	var m := Util.mat(Color(0.93, 0.92, 0.88) if kind == "flour" else Color(0.72, 0.6, 0.4), 0.95)
+	if kind == "empty":
+		sk.add_child(Util.sphere(0.24, m, Vector3(0, 0.05, 0), Vector3(1.15, 0.22, 0.8)))
+	else:
+		sk.add_child(Util.sphere(0.22, m, Vector3(0, 0.3, 0), Vector3(1.0, 1.4, 0.8)))
+		sk.add_child(Util.cyl(0.04, 0.07, 0.12, m, Vector3(0, 0.62, 0)))
+		sk.add_child(Util.cyl(0.045, 0.045, 0.025, Util.mat(Color(0.4, 0.3, 0.18), 0.9), Vector3(0, 0.6, 0)))
+	sk.set_meta("to", "barn")
+	sk.set_meta("kind", "sack")
+	return sk
+
+
+func _hay() -> Node3D:
+	var hy := Node3D.new()
+	hy.name = "Hay"
+	hy.add_child(Util.sphere(0.36, Util.mat(Color(0.86, 0.74, 0.38), 0.95), Vector3(0, 0.2, 0), Vector3(1.3, 0.6, 0.95)))
+	hy.set_meta("to", "barn")
+	return hy
+
+
+# ---------------- речі: на віз, з воза, у руки, на місце
+func _cart_side(cart: Node3D) -> Vector3:
+	return cart.to_global(Vector3(-1.05, 0, -0.7))
+
+
+func _hold_carry(items: Array) -> void:
+	## Бере кілька речей в'язкою: перша — в руці, решта — зверху на ній (вудка — збоку).
+	var list := items.duplicate()
+	var rod = _gear.get("rod")
+	if rod != null and rod in list and list.size() > 1:
+		list.erase(rod)
+		list.append(rod)
+	_carry = list
+	if list.is_empty():
+		return
+	var root: Node3D = list[0]
+	for i in range(1, list.size()):
+		var o: Node3D = list[i]
+		if o.get_parent():
+			o.get_parent().remove_child(o)
+		root.add_child(o)
+		if o == rod:
+			o.transform = Transform3D(Basis(Vector3.RIGHT, 0.25), Vector3(0.12, 0.05, 0))
+		else:
+			o.transform = Transform3D(Basis(), Vector3(0, 0.3 * i, 0))
+	hold_upright(root, 0.3, false, 0.1)
+
+
+func _drop_carry() -> Array:
+	## Опускає з рук усю в'язку; повертає речі (вже без батьків).
+	var items := _carry.duplicate()
+	_carry.clear()
+	drop()
+	for o in items:
+		if is_instance_valid(o) and o.get_parent():
+			o.get_parent().remove_child(o)
+	return items
+
+
+func _store(o) -> void:
+	## Річ — на своє місце (вудка, стільчик, відро — у майстерню), решта — прибрати.
+	if o == null or not is_instance_valid(o):
+		return
+	if o.get_parent():
+		o.get_parent().remove_child(o)
+	var home: Node = o.get_meta("home_parent", null)
+	if home and is_instance_valid(home):
+		home.add_child(o)
+		o.transform = o.get_meta("home_tr", Transform3D())
+		var fill: Node = o.get_node_or_null("fill")
+		if fill:
+			for c in fill.get_children():
+				c.queue_free()
+	else:
+		o.queue_free()
+
+
+func _put_in_cart(id: int, cart: Node3D) -> bool:
+	## Кладе на віз усе, що несе.
+	if _carry.is_empty():
+		return id == job
+	await go(_cart_side(cart))
+	if id != job:
+		return false
+	face(cart.to_global(Vector3(0, 0, -0.7)))
+	await wait(0.35)
+	play("pick")
+	await wait(0.8)
+	for o in _drop_carry():
+		cart.add_child(o)
+		if o == _gear.get("rod"):
+			o.transform = Transform3D(Basis(Vector3.RIGHT, -PI / 2.0), ROD_IN_CART)
+		else:
+			var slot: Vector3 = CART_SLOTS[_cargo.size() % CART_SLOTS.size()]
+			o.transform = Transform3D(Basis(Vector3.UP, randf_range(-0.4, 0.4)), slot)
+		_cargo.append(o)
+	play("idle")
+	return id == job
+
+
+func _take_from_cart(id: int, cart: Node3D, items: Array) -> bool:
+	await go(_cart_side(cart))
+	if id != job:
+		return false
+	face(cart.to_global(Vector3(0, 0, -0.7)))
+	await wait(0.35)
+	play("pick")
+	await wait(0.8)
+	if id != job:
+		return false
+	for o in items:
+		_cargo.erase(o)
+	_hold_carry(items)
+	play("idle")
+	await wait(0.3)
+	return id == job
+
+
+func _cargo_kind(k: String) -> Node3D:
+	for o in _cargo:
+		if is_instance_valid(o) and String(o.get_meta("kind", "")) == k:
+			return o
+	return null
+
+
+func _deliver(id: int) -> void:
+	## Удома: мішки й солому — у сарай, вудку, стільчик і відро — у майстерню, кошик — на ґанок.
+	for dest in ["barn", "workshop", "porch"]:
+		var here: Array = []
+		for o in _carry:
+			if is_instance_valid(o) and String(o.get_meta("to", "porch")) == dest:
+				here.append(o)
+		if here.is_empty():
+			continue
+		var p: Vector3 = spots["barn"] if dest == "barn" else (SHOP_STAND if dest == "workshop" else spots["porch"] + Vector3(0.6, 0, 0.7))
+		await go(p)
+		if id != job:
+			return
+		play("pick")
+		await wait(0.8)
+		var rest: Array = []
+		for o in _drop_carry():
+			if o in here:
+				_store(o)
+			else:
+				rest.append(o)
+		play("idle")
+		if not rest.is_empty():
+			_hold_carry(rest)
+		await wait(0.3)
+	say("Ось і вдома!", 2.0)
+
+
+# ---------------- віз: сісти, злізти, їхати, розпрягти й запрягти в дорозі
+func _hitch_and_mount(id: int, cart: Node3D, h: Node3D) -> bool:
+	if not cart.hitched:
+		if not await _harness_horse(id, cart, h):
+			return false
+	if not await _to_climb_spot(id, cart):
+		return false
+	await _cart_climb_on(cart)
+	bounds = TRIP_BOUNDS
+	extra_obs = Obstacles.outer
+	return id == job
+
+
+func _get_off(id: int, cart: Node3D) -> bool:
+	cart.speed = 0.0
+	var h: Node3D = cart.horse
+	if h:
+		h.hitch_move(h.rotation.y, 0.0, 0.0)
+	await _cart_climb_off(cart)
+	bounds = TRIP_BOUNDS
+	extra_obs = Obstacles.outer
+	return id == job
+
+
+func _unhitch_here(id: int, cart: Node3D) -> bool:
+	## Розпрягає коня там, де став віз; кінь стоїть поруч і чекає.
+	var h: Node3D = cart.horse
+	if h == null or not cart.hitched:
+		return id == job
+	say("Тпру! Розпряжу — відпочинь, коню.", 2.0)
+	if h.to_local(global_position).x < 0.0:
+		await go(h.to_global(Vector3(0, 0, 2.6)))
+	await go(h.to_global(LEAD_AT))
+	if id != job:
+		return false
+	_face_to = h.rotation.y
+	play("wave", 1.0)
+	await wait(1.0)
+	if id != job:
+		return false
+	cart.drop_shafts()
+	h.show_harness(false)
+	cart.harness_to_cart()
+	if not await _lead_horse(id, h, [h.to_global(Vector3(0, 0, 2.2)), cart.to_global(Vector3(-3.4, 0, 1.6))]):
+		return false
+	_release_lead()
+	return id == job
+
+
+func _horse_go(id: int, cart: Node3D, p: Vector3, v: float, reach: float, steer: bool) -> bool:
+	## Кінь із возом іде до точки (на пагорбі — по схилу).
+	var h: Node3D = cart.horse
+	var t := 0.0
+	while t < 70.0:
+		if id != job or h == null or not is_instance_valid(h) or cart.horse != h:
+			cart.speed = 0.0
+			return false
+		var dt := get_process_delta_time()
+		t += dt
+		var hp: Vector3 = h.global_position
+		if Vector2(p.x - hp.x, p.z - hp.z).length() < reach:
+			break
+		var tgt: Vector3 = Vehicles.steer_target(hp, p, 1.4) if steer else p
+		var to := tgt - hp
+		to.y = 0.0
+		var hd := lerp_angle(h.rotation.y, atan2(to.x, to.z), 1.0 - exp(-dt * 2.2))
+		var sp := minf(v, maxf(0.5, to.length() * 1.2))
+		cart.speed = move_toward(cart.speed, sp, dt * 1.5)
+		h.hitch_move(hd, cart.speed, dt)
+		h.global_position.y = Util.hill_y(h.global_position) if Util.on_hill(h.global_position) else 0.0
+		await get_tree().process_frame
+	return id == job
+
+
+func _drive(id: int, cart: Node3D, way: Array, v := 2.6) -> bool:
+	for wp in way:
+		if not await _horse_go(id, cart, wp, v, 1.3, true):
+			return false
+	cart.speed = 0.0
+	var h: Node3D = cart.horse
+	if h:
+		h.hitch_move(h.rotation.y, 0.0, 0.0)
+	return id == job
+
+
+func _park_home(id: int, cart: Node3D) -> bool:
+	## Під садок, на стоянку (оглоблями на північ).
+	if not await _drive(id, cart, GARDEN_LOOP, 2.2):
+		return false
+	var hp: Vector3 = cart.hitch_pos()
+	if not await _horse_go(id, cart, hp, 1.3, 0.4, false):
+		return false
+	var h: Node3D = cart.horse
+	var t := 0.0
+	while t < 0.8 and h and id == job:
+		t += get_process_delta_time()
+		h.global_position = h.global_position.lerp(hp, 0.15)
+		h.rotation.y = lerp_angle(h.rotation.y, cart.park_yaw, 0.15)
+		await get_tree().process_frame
+	cart.speed = 0.0
+	return id == job
+
+
+func _trip_home(id: int, cart: Node3D, way: Array) -> void:
+	## Додому: стоянка під садком, злізти, розпрягти, забрати з воза привезене й рознести.
+	say("Но-о, коню! Додому!", 2.5)
+	if not await _drive(id, cart, way):
+		return
+	if not await _park_home(id, cart):
+		return
+	if not await _get_off(id, cart):
+		return
+	if not await _unharness_horse(id, cart):
+		return
+	if not _cargo.is_empty():
+		if not await _take_from_cart(id, cart, _cargo.duplicate()):
+			return
+	bounds = FOREST_BOUNDS
+	for k in range(GARDEN_WALK.size() - 1, -1, -1):
+		await go(GARDEN_WALK[k])
+		if id != job:
+			return
+	if not await _come_back(id):
+		return
+	await _deliver(id)
+	if id != job:
+		return
+	_trip = ""
+	end_job(id)
+
+
+func _yard_out(id: int) -> bool:
+	await go(spots["inside_gate"] + Vector3(0.2, 0, 0))
+	if id != job:
+		return false
+	await world.pass_gate(self, true)
+	bounds = TRIP_BOUNDS
+	extra_obs = Obstacles.outer
+	return id == job
+
+
+func _fetch_from_yard(id: int, what: String) -> bool:
+	## Від воза біля воріт — у двір: мішок пшениці із сараю чи відро з майстерні — і знову за ворота.
+	if not await _come_back(id):
+		return false
+	if what == "sack":
+		await go(spots["barn"])
+		if id != job:
+			return false
+		await go(BARN_REACH, false, false)
+		if id != job:
+			return false
+		face(BARN_SACKS)
+		await wait(0.4)
+		play("pick")
+		await wait(0.9)
+		_hold_carry([_sack("wheat")])
+	else:
+		await go(SHOP_STAND)
+		if id != job:
+			return false
+		face(SHOP_GEAR["bucket"])
+		await wait(0.4)
+		play("pick")
+		await wait(0.9)
+		_hold_carry([_gear["bucket"]])
+	play("idle")
+	if id != job:
+		return false
+	return await _yard_out(id)
+
+
+func _trip_setup(id: int) -> bool:
+	if seated != "":
+		await stand_up()
+	if lying:
+		_wake_reset()
+	if at_home:
+		if not await _walk_out(id):
+			return false
+	return id == job
+
+
+func _trip_abort() -> void:
+	## Поїздку перервали: віз і кінь — під садок, речі — на місце, дідусь — на подвір'я.
+	_trip = ""
+	_rod_hand = false
+	_rod_lift = 0.0
+	if _line:
+		_line.visible = false
+	if _bobber:
+		_bobber.visible = false
+	if _seed_fx:
+		_seed_fx.emitting = false
+	var m := _main()
+	var cart: Node3D = m.garden_cart
+	var h: Node3D = m.garden_horse
+	_climbing = false
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	if cart and on_tractor == cart:
+		on_tractor = null
+		seated = ""
+		global_position = cart.to_global(Vector3(-1.0, 0, 0))
+		global_position.y = 0.0
+		model.position = Vector3(0, _base_y, 0)
+	elif seated == "stool":
+		seated = ""
+		_seat_dy = 0.0
+		current = ""
+		model.position = Vector3(0, _base_y, 0)
+		if ap:
+			ap.speed_scale = 1.0
+	for o in _drop_carry() + _cargo:
+		_store(o)
+	_cargo.clear()
+	for k in _gear:
+		_store(_gear[k])
+	if cart:
+		cart.unhitch()
+	if h:
+		if h.mode == "hitched":
+			h.hitch_release()
+		h.global_position = GARDEN_PADDOCK
+		h.rotation.y = 0.0
+	if not at_home and not YARD_BOUNDS.grow(0.5).has_point(Vector2(global_position.x, global_position.z)):
+		position = spots["inside_gate"]
+		bounds = YARD_BOUNDS
+		extra_obs = []
+
+
+func trip_job(kind: String) -> void:
+	## Поїздки возом: "mush" — по гриби, "market" — на ринок, "fish" — на рибу, "mill" — у млин,
+	## "sow" — сіяти пшеницю, "farm" — на ферму.
+	var m := _main()
+	var cart: Node3D = m.garden_cart
+	var h: Node3D = m.garden_horse
+	if cart == null or h == null:
+		say("Ех, коня чи воза в нас нема…", 2.5)
+		return
+	var id := begin_job("trip")
+	_trip = kind
+	if not await _trip_setup(id):
+		return
+	match kind:
+		"mush":
+			await _mush_trip(id, cart, h)
+		"market":
+			await _market_trip(id, m, cart, h)
+		"fish":
+			await _fish_trip(id, cart, h)
+		"mill":
+			await _mill_trip(id, cart, h)
+		"sow":
+			await _sow_trip(id, m, cart, h)
+		"farm":
+			await _farm_trip(id, m, cart, h)
+
+
+# ---------------- по гриби
+func _mush_trip(id: int, cart: Node3D, h: Node3D) -> void:
+	if forest == null:
+		say("Ліс далеко, а грибів нема…", 2.5)
+		_trip = ""
+		end_job(id)
+		return
+	say("Візьму кошика й поїду конем у ліс по гриби!", 3.0)
+	var basket := Util.basket()
+	basket.set_meta("to", "porch")
+	_hold_carry([basket])
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	say("Гайда в ліс!", 2.0)
+	if not await _drive(id, cart, TO_EAST + [Vector3(71.0, 0, 5.0), Vector3(100.0, 0, 5.5), Vector3(110.0, 0, 1.5)]):
+		return
+	if not await _get_off(id, cart):
+		return
+	if not await _unhitch_here(id, cart):
+		return
+	if not await _take_from_cart(id, cart, [basket]):
+		return
+	var end: Vector3 = FOREST_WAY[FOREST_WAY.size() - 1]
+	for wp in [FOREST_WAY[6], end]:
+		await go(wp)
+		if id != job:
+			return
+	var got := 0
+	for it in forest.nearest_goods(end, 6):
+		await go(forest.goods_pos(it) + Vector3(0.5, 0, 0.5))
+		if id != job:
+			return
+		face(forest.goods_pos(it))
+		play("pick")
+		await wait(0.9)
+		if id != job:
+			return
+		var col: Color = forest.kind_color(it)
+		var n: int = forest.take(it)
+		got += n
+		if n > 0:
+			Util.basket_add(basket, col, 0.05)
+		play("idle")
+	say("Назбирав %d — буде на вечерю!" % got if got > 0 else "Сьогодні все вже позбирали…", 3.0)
+	if got > 0:
+		Game.emit_event("forest")
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	await _trip_home(id, cart, [Vector3(104.0, 0, 9.0), Vector3(100.0, 0, 5.5), Vector3(71.0, 0, 5.0), Vector3(30.0, 0, 5.5)])
+
+
+# ---------------- на ринок
+func _market_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
+	say("Поїду на ринок, куплю чогось смачненького!", 3.0)
+	var basket := Util.basket()
+	basket.set_meta("to", "porch")
+	_hold_carry([basket])
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	if not await _drive(id, cart, TO_WEST + VILLAGE_DOWN + [Vector3(1.6, 0, 90.0)]):
+		return
+	if not await _get_off(id, cart):
+		return
+	if not await _take_from_cart(id, cart, [basket]):
+		return
+	for wp in [Vector3(0, 0, 96.5), Vector3(0, 0, 110.0), Vector3(0, 0, 160.0)]:
+		await go(wp)
+		if id != job:
+			return
+	var bz = m.world.outer.bazaar
+	var bought := 0
+	if bz:
+		for shop in ["bread", "sausage", "fruit"]:
+			var sd: Dictionary = {}
+			for s in bz.sellers:
+				if String(s.get("shop", "")) == shop and s.has("front"):
+					sd = s
+					break
+			if sd.is_empty():
+				continue
+			await go(sd["front"])
+			if id != job:
+				return
+			face((sd["node"] as Node3D).global_position)
+			say(SHOP_ASK[shop], 2.5)
+			await wait(1.6)
+			bz.seller_say(sd["node"], "Прошу, діду Петре! Смачного!")
+			bz.seller_give(sd)
+			await wait(1.0)
+			for i in 4:
+				Util.basket_add(basket, SHOP_COL[shop], 0.045)
+			bought += 1
+			say("Дякую, будьте здорові!", 1.8)
+			await wait(1.4)
+			if id != job:
+				return
+	say("Повний кошик гостинців!" if bought > 0 else "Щось ринок сьогодні порожній…", 2.5)
+	for wp in [Vector3(0, 0, 160.0), Vector3(0, 0, 110.0), Vector3(0, 0, 96.5)]:
+		await go(wp)
+		if id != job:
+			return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	await _trip_home(id, cart, [Vector3(-5.0, 0, 93.5), Vector3(-7.0, 0, 88.0), Vector3(-2.0, 0, 82.0)] + VILLAGE_UP)
+
+
+# ---------------- на рибу
+func _pier_pt(s: float) -> Vector3:
+	## Точка на осі причалу: s метрів від берегового краю (від'ємне — на березі).
+	var a: Vector2 = Util.pier["a"]
+	var b: Vector2 = Util.pier["b"]
+	var q := a + (b - a).normalized() * s
+	return Vector3(q.x, 0, q.y)
+
+
+static func _basis_y(d: Vector3) -> Basis:
+	var y := d.normalized()
+	var x := y.cross(Vector3.FORWARD) if absf(y.dot(Vector3.FORWARD)) < 0.9 else y.cross(Vector3.RIGHT)
+	x = x.normalized()
+	return Basis(x, y, x.cross(y))
+
+
+func _rod_step() -> void:
+	## Вудка в правій руці; волосінь — від кінчика до поплавця.
+	var rod: Node3D = _gear.get("rod")
+	if rod == null or hand == null or not rod.is_inside_tree():
+		return
+	var f := Vector3(sin(rotation.y), 0, cos(rotation.y))
+	var d := (f * 0.85 + Vector3.UP * (0.5 + _rod_lift)).normalized()
+	rod.global_transform = Transform3D(_basis_y(d), hand.global_position)
+	if _bobber and _bobber.visible:
+		var bp := _bobber.global_position
+		bp.y = 0.06 - _bob_dip + sin(Time.get_ticks_msec() * 0.003) * 0.008
+		_bobber.global_position = bp
+	if _line and _line.visible and _bobber:
+		var tip := hand.global_position + d * ROD_LEN
+		var v := _bobber.global_position + Vector3(0, 0.03, 0) - tip
+		var bs := _basis_y(v)
+		bs.y = bs.y * maxf(v.length(), 0.01)
+		_line.global_transform = Transform3D(bs, tip + v * 0.5)
+
+
+func _show_line(at: Vector3) -> void:
+	if _line == null:
+		_line = MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.003
+		cm.bottom_radius = 0.003
+		cm.height = 1.0
+		cm.radial_segments = 4
+		_line.mesh = cm
+		_line.material_override = Util.mat(Color(0.9, 0.9, 0.85), 0.5)
+		_line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		world.yard_root.add_child(_line)
+		_bobber = Node3D.new()
+		_bobber.add_child(Util.sphere(0.03, Util.mat(Color(0.9, 0.15, 0.1), 0.4), Vector3(0, 0.02, 0)))
+		_bobber.add_child(Util.sphere(0.028, Util.mat(Color(0.95, 0.95, 0.95), 0.4), Vector3(0, -0.01, 0)))
+		world.yard_root.add_child(_bobber)
+	_bobber.global_position = Vector3(at.x, 0.06, at.z)
+	_bobber.visible = true
+	_line.visible = true
+
+
+func _catch_fish(bucket: Node3D) -> void:
+	## Рибка вилітає з води й падає у відро.
+	var from := _bobber.global_position
+	var f := Node3D.new()
+	world.yard_root.add_child(f)
+	f.global_position = from
+	var kinds := ["fish_orange", "fish_blue", "fish_spotted", "fish_guppy"]
+	if Models.spawn(f, kinds[randi() % kinds.size()], 0.24, "realx") == null:
+		f.add_child(Util.sphere(0.06, Util.mat(Color(0.95, 0.55, 0.15), 0.4), Vector3.ZERO, Vector3(2.2, 1.0, 0.8)))
+	var to := bucket.global_position + Vector3(randf_range(-0.04, 0.04), 0.26, randf_range(-0.04, 0.04))
+	var mid := (from + to) * 0.5 + Vector3(0, 1.6, 0)
+	var fly := func(t: float) -> void:
+		if is_instance_valid(f):
+			f.global_position = from.lerp(mid, t).lerp(mid.lerp(to, t), t)
+			f.rotation.z = t * TAU
+	var tw := create_tween()
+	tw.tween_method(fly, 0.0, 1.0, 1.1)
+	await tw.finished
+	if is_instance_valid(f) and is_instance_valid(bucket):
+		var fill: Node = bucket.get_node_or_null("fill")
+		f.reparent(fill if fill else bucket, true)
+		f.rotation = Vector3(0, randf() * TAU, PI / 2.0)
+	elif is_instance_valid(f):
+		f.queue_free()
+
+
+func _fish_trip(id: int, cart: Node3D, h: Node3D) -> void:
+	var rod: Node3D = _gear.get("rod")
+	var stool: Node3D = _gear.get("stool")
+	var bucket: Node3D = _gear.get("bucket")
+	if rod == null or Util.pier.is_empty():
+		_trip = ""
+		end_job(id)
+		return
+	say("Поїду на ставок рибку ловити!", 2.5)
+	await go(SHOP_STAND)
+	if id != job:
+		return
+	face(SHOP_GEAR["stool"])
+	await wait(0.4)
+	play("pick")
+	await wait(0.9)
+	_hold_carry([bucket, stool, rod])
+	play("idle")
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	var park := _pier_pt(-5.5)
+	say("Гайда на ставок!", 2.0)
+	if not await _drive(id, cart, TO_WEST + [Vector3(3.0, 0, 10.5), Vector3(-1.0, 0, 20.0), Vector3(-2.0, 0, 29.0),
+			Vector3(-36.0, 0, 25.0), Vector3(-41.0, 0, 36.0), park]):
+		return
+	if not await _get_off(id, cart):
+		return
+	if not await _unhitch_here(id, cart):
+		return
+	if not await _take_from_cart(id, cart, [bucket, stool, rod]):
+		return
+	# на причал
+	var a: Vector2 = Util.pier["a"]
+	var b: Vector2 = Util.pier["b"]
+	var L := a.distance_to(b)
+	var u := (b - a).normalized()
+	var deck := float(Util.pier["y"])
+	var yaw := atan2(u.x, u.y)
+	var fwd := Vector3(u.x, 0, u.y)
+	var side := Vector3(cos(yaw), 0, -sin(yaw))
+	var back := (HIPS_SIT + HIPS_SITANIM_STAND - HIPS_IDLE - HIPS_SITANIM_SIT) * _k
+	var seat_s := L - 1.6
+	await go(_pier_pt(-1.2))
+	if id != job:
+		return
+	for s in [0.6, seat_s - 0.9]:
+		await go(_pier_pt(s), false, false)
+		if id != job:
+			return
+	_face_to = yaw
+	await wait(0.4)
+	play("pick")
+	await wait(0.8)
+	if id != job:
+		return
+	var seat_p := _pier_pt(seat_s)
+	seat_p.y = deck
+	var root: Node3D = world.yard_root
+	_drop_carry()
+	root.add_child(stool)
+	stool.global_transform = Transform3D(Basis(Vector3.UP, yaw), seat_p)
+	root.add_child(bucket)
+	bucket.global_transform = Transform3D(Basis(), seat_p + side * 0.5)
+	root.add_child(rod)
+	_rod_hand = true
+	play("idle")
+	await wait(0.4)
+	await go(seat_p + fwd * back, false, false)
+	if id != job:
+		return
+	_face_to = yaw
+	await wait(0.6)
+	rotation.y = yaw
+	await _sit_down("stool", seat_p, -0.1)
+	if id != job:
+		return
+	_show_line(seat_p + fwd * 3.4)
+	say("Ловись, рибко, велика й маленька!", 3.0)
+	for i in 3:
+		await wait(randf_range(5.0, 9.0))
+		if id != job:
+			return
+		say("Клює!", 1.2)
+		_bob_dip = 0.05
+		await wait(0.7)
+		_bob_dip = 0.0
+		_rod_lift = 0.6
+		await _catch_fish(bucket)
+		_rod_lift = 0.0
+		if id != job:
+			return
+	say("Три рибки — буде юшка!", 3.0)
+	await wait(1.5)
+	if id != job:
+		return
+	_line.visible = false
+	_bobber.visible = false
+	_rod_hand = false
+	await stand_up()
+	if id != job:
+		return
+	play("pick")
+	await wait(0.8)
+	_hold_carry([bucket, stool, rod])
+	play("idle")
+	await go(_pier_pt(0.6), false, false)
+	if id != job:
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	await _trip_home(id, cart, [_pier_pt(-12.0) + Vector3(6.0, 0, 0), Vector3(-36.0, 0, 38.0), Vector3(-34.0, 0, 26.0)] + POND_ROAD_HOME)
+
+
+# ---------------- у млин
+func _mill_trip(id: int, cart: Node3D, h: Node3D) -> void:
+	say("Поїду в млин, змелю пшениці!", 2.5)
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	if not await _drive(id, cart, TO_WEST + [GATE_STOP]):
+		return
+	if not await _get_off(id, cart):
+		return
+	if not await _fetch_from_yard(id, "sack"):
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	var c := Vector3(Util.HILL_C.x, 0, Util.HILL_C.y)
+	var dv := Vector3(0.4472136, 0, 0.8944272)            # від млина вздовж дороги вниз
+	var sd := Vector3(dv.z, 0, -dv.x)
+	say("Гайда до млина на пагорбі!", 2.5)
+	if not await _drive(id, cart, [Vector3(-3.0, 0, 13.0), Vector3(-2.0, 0, 24.0), Vector3(-2.0, 0, 29.0), Vector3(-46.0, 0, 22.0),
+			c + dv * 34.0, c + dv * 20.0, c + dv * 9.5], 2.4):
+		return
+	if not await _get_off(id, cart):
+		return
+	var sack := _cargo_kind("sack")
+	if sack == null:
+		return
+	if not await _take_from_cart(id, cart, [sack]):
+		return
+	await go(c + dv * 4.0 + sd * 1.3)
+	if id != job:
+		return
+	await go(c + dv * 1.3, false, false)
+	if id != job:
+		return
+	play("pick")
+	await wait(0.8)
+	for o in _drop_carry():
+		_store(o)
+	say("Мели, млинку, борошенце!", 3.0)
+	play("idle")
+	await wait(10.0)
+	if id != job:
+		return
+	play("pick")
+	await wait(0.8)
+	_hold_carry([_sack("flour")])
+	play("idle")
+	say("Ось і борошно — будуть пиріжки!", 2.5)
+	await go(c + dv * 4.0 + sd * 1.3, false, false)
+	if id != job:
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	await _trip_home(id, cart, [c + dv * 7.0 + sd * 5.0, c + dv * 13.0 + sd * 2.5, c + dv * 22.0, c + dv * 34.0,
+		Vector3(-46.0, 0, 22.0)] + POND_ROAD_HOME)
+
+
+# ---------------- сіяти пшеницю
+func _seed(on: bool) -> void:
+	if _seed_fx == null:
+		_seed_fx = CPUParticles3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.012
+		sm.height = 0.024
+		sm.radial_segments = 4
+		sm.rings = 2
+		sm.material = Util.mat(Color(0.92, 0.8, 0.4), 0.6)
+		_seed_fx.mesh = sm
+		_seed_fx.amount = 40
+		_seed_fx.lifetime = 0.9
+		_seed_fx.direction = Vector3(0.6, 0.6, 1.0)
+		_seed_fx.spread = 35.0
+		_seed_fx.initial_velocity_min = 1.8
+		_seed_fx.initial_velocity_max = 3.0
+		_seed_fx.gravity = Vector3(0, -9.8, 0)
+		_seed_fx.local_coords = false
+		_seed_fx.position = Vector3(0.3, 1.1, 0.3)
+		add_child(_seed_fx)
+	_seed_fx.emitting = on
+
+
+func _sow_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
+	say("Поїду сіяти пшеницю!", 2.5)
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	if not await _drive(id, cart, TO_WEST + [GATE_STOP]):
+		return
+	if not await _get_off(id, cart):
+		return
+	if not await _fetch_from_yard(id, "sack"):
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _fetch_from_yard(id, "bucket"):
+		return
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	say("Гайда на поле!", 2.0)
+	if not await _drive(id, cart, [Vector3(-4.0, 0, 12.0), Vector3(-3.0, 0, 20.0), Vector3(4.0, 0, 22.0), Vector3(9.0, 0, 14.0),
+			Vector3(14.0, 0, 9.6), Vector3(22.0, 0, 7.5)] + GARDEN_TO_FIELD.slice(1)):
+		return
+	if not await _get_off(id, cart):
+		return
+	var f: Rect2 = m.world.outer.PLOW_FIELD
+	var bucket: Node3D = _gear["bucket"]
+	var sack := _cargo_kind("sack")
+	var corner := Vector3(f.position.x + 0.8, 0, f.end.y + 0.8)
+	var sack_at := corner + Vector3(0.6, 0, 0.3)
+	if sack:
+		if not await _take_from_cart(id, cart, [sack]):
+			return
+		await go(corner)
+		if id != job:
+			return
+		play("pick")
+		await wait(0.8)
+		_drop_carry()
+		world.yard_root.add_child(sack)
+		sack.global_position = sack_at
+		play("idle")
+	if not await _take_from_cart(id, cart, [bucket]):
+		return
+	await go(corner)
+	if id != job:
+		return
+	face(sack_at)
+	say("Насиплю зерна у відро.", 2.0)
+	play("pick")
+	await wait(1.2)
+	var fill: Node = bucket.get_node_or_null("fill")
+	if fill:
+		fill.add_child(Util.cyl(0.14, 0.14, 0.03, Util.mat(Color(0.88, 0.75, 0.38), 0.9), Vector3(0, 0.26, 0)))
+	play("idle")
+	if id != job:
+		return
+	say("Сію-вію, посіваю!", 3.0)
+	_seed(true)
+	var east := true
+	for z in [f.position.y + 3.0, f.position.y + 9.0, f.position.y + 15.0]:
+		await go(Vector3(f.position.x + 1.0 if east else f.end.x - 1.0, 0, z))
+		if id != job:
+			_seed(false)
+			return
+		await go(Vector3(f.end.x - 1.0 if east else f.position.x + 1.0, 0, z))
+		if id != job:
+			_seed(false)
+			return
+		east = not east
+	_seed(false)
+	if fill:
+		for ch in fill.get_children():
+			ch.queue_free()
+	say("Посіяв! Рости, пшеничко, колосиста!", 3.0)
+	await go(corner)
+	if id != job:
+		return
+	play("pick")
+	await wait(0.8)
+	if sack and is_instance_valid(sack):
+		sack.queue_free()
+	_hold_carry([bucket, _sack("empty")])
+	play("idle")
+	if not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	await _trip_home(id, cart, [Vector3(79.0, 0, 9.5), Vector3(72.0, 0, 11.0), Vector3(30.0, 0, 5.5)])
+
+
+# ---------------- на ферму
+func _talk_worker(id: int, m: Node) -> void:
+	## Іде до когось із робітників ферми й говорить.
+	var w = null
+	var nm := ""
+	var bd := INF
+	for pair in [[m.groom, "Семене"], [m.shepherd, "Іване"]]:
+		var c = pair[0]
+		if c != null and is_instance_valid(c) and c.visible and c.process_mode != Node.PROCESS_MODE_DISABLED:
+			var d: float = (c as Node3D).global_position.distance_to(global_position)
+			if d < 90.0 and d < bd:
+				bd = d
+				w = c
+				nm = pair[1]
+	if w == null:
+		say("Хлопців не видно — мабуть, обідають.", 3.0)
+		await wait(2.5)
+		return
+	for i in 4:
+		var to: Vector3 = (w as Node3D).global_position
+		var dir := global_position - to
+		dir.y = 0.0
+		if dir.length() < 2.2:
+			break
+		await go(to + dir.normalized() * 1.4)
+		if id != job:
+			return
+	face((w as Node3D).global_position)
+	w.face(global_position)
+	say("Здоров був, %s! Як там на фермі?" % nm, 3.0)
+	play("talk")
+	await wait(3.0)
+	if id != job:
+		return
+	w.say("Добрий день, діду Петре! Усе гаразд, худоба ситенька!", 3.5)
+	await wait(3.5)
+	if id != job:
+		return
+	say("От і добре! Візьму в вас соломки.", 2.5)
+	await wait(2.5)
+	play("idle")
+
+
+func _farm_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
+	say("Поїду на ферму, провідаю хлопців і візьму соломи.", 3.0)
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	if not await _drive(id, cart, TO_WEST + VILLAGE_DOWN + [Vector3(-3.0, 0, 93.0), Vector3(-12.0, 0, 95.0), Vector3(-160.0, 0, 95.0),
+			Vector3(-171.5, 0, 89.0), Vector3(-171.5, 0, 78.0)]):
+		return
+	if not await _get_off(id, cart):
+		return
+	await _talk_worker(id, m)
+	if id != job:
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	if not await _drive(id, cart, [Vector3(-171.5, 0, 60.0), Vector3(-172.0, 0, 42.0), FARM_HAY_STOP], 2.0):
+		return
+	if not await _get_off(id, cart):
+		return
+	var hay_at: Vector3 = m.FARM_HAY
+	for i in 2:
+		await go(hay_at + Vector3(2.0, 0, 1.0 + i * 0.6))
+		if id != job:
+			return
+		face(hay_at)
+		await wait(0.3)
+		play("pick")
+		await wait(1.0)
+		_hold_carry([_hay()])
+		if m.has_method("add_farm_hay"):
+			m.add_farm_hay(-0.08)
+		play("idle")
+		if not await _put_in_cart(id, cart):
+			return
+	say("Соломки набрав — додому!", 2.0)
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	await _trip_home(id, cart, [Vector3(-171.5, 0, 24.0), Vector3(-168.0, 0, 15.0)] + NORTH_HOME)

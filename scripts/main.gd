@@ -470,6 +470,8 @@ func _watch_doors(dt: float) -> void:
 			mv.append(c.global_position)
 	if horse and horse.visible:
 		mv.append(horse.global_position)
+	if garden_horse and garden_horse.visible:
+		mv.append(garden_horse.global_position)
 	for eh in extra_horses:
 		if eh.visible:
 			mv.append(eh.global_position)
@@ -1119,6 +1121,18 @@ func _on_action(name: String) -> void:
 		"gp_forest":
 			grandpa.cancel_job()
 			grandpa.forest_job()
+			_follow_later(grandpa)
+		"gp_read":
+			grandpa.read_job()
+		"gp_mush", "gp_market", "gp_fish", "gp_mill", "gp_sow", "gp_farm":
+			if garden_cart == null or garden_horse == null:
+				hud.toast("Немає моделі коня чи воза — завантаж на GitHub файл models_11.zip", 5.0)
+				return
+			if grandpa.doing == "sleep" or grandpa.lying:
+				hud.toast("Дідусь спить — кінь почекає до ранку", 3.0)
+				return
+			grandpa.cancel_job()
+			grandpa.trip_job(name.substr(3))
 			_follow_later(grandpa)
 		"gr_talk":
 			_granny_talk()
