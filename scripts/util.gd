@@ -456,17 +456,56 @@ static func thing(kind: String) -> Node3D:
 
 
 # ------------------------------------------------------------------ озвучка реплік (системний голос телефона)
-# кожному своя висота голосу (0…2) і швидкість мовлення
+# кожному: чоловічий ("m") чи жіночий ("f") голос, висота (0…2) і швидкість мовлення
 const VOICES := {
-	"grandpa": [0.6, 0.85], "granny": [1.25, 0.9], "girl": [1.5, 1.05], "kid": [1.6, 1.15], "robot_kid": [1.9, 1.2],
-	"shepherd": [0.8, 0.95], "groom": [0.7, 1.0], "student": [1.1, 1.05], "beep": [2.0, 1.25],
+	"grandpa": ["m", 0.8, 0.85], "shepherd": ["m", 0.95, 0.95], "groom": ["m", 0.88, 1.0], "student": ["m", 1.1, 1.05],
+	"kid": ["m", 1.35, 1.15], "robot_kid": ["m", 1.7, 1.2], "beep": ["m", 1.9, 1.25],
+	"granny": ["f", 0.9, 0.88], "girl": ["f", 1.3, 1.05],
 }
 const VOICE_NEAR := 25.0                 # далі від камери — не чути
-static var _tts_voice := ""
+static var _tts := {}                    # {"m": id, "f": id, "two": чи є окремий чоловічий голос}
+
+
+static func _pick_voices() -> void:
+	## Українські голоси телефона: шукаємо чоловічий і жіночий (однаковий голос у різних варіантах — один).
+	var seen := {}
+	var m := ""
+	var f := ""
+	var other: Array = []
+	for v in DisplayServer.tts_get_voices():
+		var vid := String(v.get("id", ""))
+		if not String(v.get("language", "")).to_lower().begins_with("uk") or vid == "":
+			continue
+		var low := vid.to_lower()
+		var base := low.trim_suffix("-local").trim_suffix("-network").trim_suffix("-language")
+		if seen.has(base):
+			continue
+		seen[base] = true
+		var n := (String(v.get("name", "")) + " " + low).to_lower()
+		if "female" in n or "smtf" in n or "жін" in n:
+			if f == "":
+				f = vid
+		elif "male" in n or "smtm" in n or "чол" in n:
+			if m == "":
+				m = vid
+		elif not low.ends_with("-language"):
+			other.append(vid)
+		elif other.is_empty():
+			other.append(vid)
+	for vid in other:
+		if f == "":
+			f = vid
+		elif m == "" and vid != f:
+			m = vid
+	if f == "":
+		f = m
+	if f == "":
+		return
+	_tts = {"f": f, "m": m if m != "" else f, "two": m != "" and m != f}
 
 
 static func speak(who: Node3D, id: String, text: String) -> void:
-	## Каже репліку вголос українським голосом телефона (якщо він є і звук не вимкнено).
+	## Каже репліку вголос: чоловіки — чоловічим голосом, жінки — жіночим (якщо такі голоси є в телефоні).
 	if not VOICES.has(id) or who == null or not who.is_inside_tree() or not who.is_visible_in_tree():
 		return
 	if AudioServer.is_bus_mute(0):
@@ -474,11 +513,14 @@ static func speak(who: Node3D, id: String, text: String) -> void:
 	var cam := who.get_viewport().get_camera_3d()
 	if cam == null or cam.global_position.distance_to(who.global_position) > VOICE_NEAR:
 		return
-	if _tts_voice == "":
-		var vs := DisplayServer.tts_get_voices_for_language("uk")
-		if vs.is_empty():
+	if _tts.is_empty():
+		_pick_voices()
+		if _tts.is_empty():
 			return
-		_tts_voice = vs[0]
-	var line := text.replace("z-z-z", "").replace("…", ", ")
 	var v: Array = VOICES[id]
-	DisplayServer.tts_speak(line, _tts_voice, 80, float(v[0]), float(v[1]), 0, true)
+	var g := String(v[0])
+	var pitch := float(v[1])
+	if g == "m" and not bool(_tts["two"]) and pitch < 1.2:
+		pitch *= 0.75                      # чоловічого голосу нема — нижче жіночий
+	var line := text.replace("z-z-z", "").replace("…", ", ")
+	DisplayServer.tts_speak(line, String(_tts[g]), 80, pitch, float(v[2]), 0, true)
