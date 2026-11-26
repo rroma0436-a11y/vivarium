@@ -1203,7 +1203,7 @@ func _map_markers() -> Array:
 # ферма за ставком (world_outer.gd: COWSHED_POS, STABLE_POS) — двері дивляться на схід (+X)
 const COW_DOORS := [Vector3(-166.9, 0, 39.0), Vector3(-166.9, 0, 55.0), Vector3(-166.9, 0, 71.0)]     # біля дверей трьох корівників (зовні)
 const COW_DOOR := Vector3(-166.9, 0, 55.0)            # середній корівник (пастух виганяє звідси)
-const COW_PASTURE := Rect2(-153.0, 35.0, 22.0, 40.0)    # пасовисько перед корівниками
+const COW_PASTURE := Rect2(-153.0, 57.0, 22.0, 18.0)    # пасовисько перед корівниками (на південь від навісу для техніки)
 const HORSE_DOORS := [Vector3(-187.0, 0, 39.7), Vector3(-187.0, 0, 55.7), Vector3(-187.0, 0, 71.7)]  # біля дверей трьох стаєнь
 const HORSE_DOOR := Vector3(-187.0, 0, 39.7)           # перша стайня (кінь для воза)
 const HORSE_PADDOCK := Rect2(-182.0, 36.0, 14.0, 36.0)   # левада перед стайнями
@@ -1222,7 +1222,7 @@ func _spawn_cattle() -> void:
 	if Models.exists("bull"):
 		bull = preload("res://scripts/bull.gd").new()
 		world.yard_root.add_child(bull)
-		bull.setup(Vector3(-145.0, 0, 45.0), COW_DOORS[0], "bull", 1.55, COW_PASTURE)
+		bull.setup(Vector3(-145.0, 0, 65.0), COW_DOORS[0], "bull", 1.55, COW_PASTURE)
 		bull.door_in = Vector3(3.0, 0, 0)
 		cows.append(bull)
 	if Models.exists("cow"):
@@ -1230,7 +1230,7 @@ func _spawn_cattle() -> void:
 		for i in 5:
 			var c = preload("res://scripts/bull.gd").new()
 			world.yard_root.add_child(c)
-			c.setup(Vector3(rng.randf_range(-151.0, -133.0), 0, rng.randf_range(37.0, 73.0)), COW_DOORS[(i + 1) % COW_DOORS.size()], "cow", rng.randf_range(1.35, 1.5), COW_PASTURE)
+			c.setup(Vector3(rng.randf_range(-151.0, -133.0), 0, rng.randf_range(58.0, 73.0)), COW_DOORS[(i + 1) % COW_DOORS.size()], "cow", rng.randf_range(1.35, 1.5), COW_PASTURE)
 			c.door_in = Vector3(3.0, 0, rng.randf_range(-0.6, 0.6))
 			c.voices = ["Му-у-у! Я — %s." % names[i], "Мууу!", "Му-у! Молочко буде!"]
 			c.night_from = 19.8 + i * 0.08
@@ -1386,13 +1386,13 @@ func _spawn_farm_extras() -> void:
 	if Models.exists("tractor"):
 		tractor = preload("res://scripts/tractor.gd").new()
 		world.yard_root.add_child(tractor)
-		tractor.setup(o.SHED, PI / 2.0, o.PLOW_FIELD)
+		tractor.setup(o.SHED, o.SHED_YAW, o.PLOW_FIELD)
 		tractor.make_field(world.yard_root)
 		if Models.exists("trailer"):
 			trailer = preload("res://scripts/trailer.gd").new()
 			world.yard_root.add_child(trailer)
-			trailer.setup(o.SHED + Vector3(3.5, 0, 4.0), PI / 2.0)
-		_make_tractor_shed(o.SHED)
+			trailer.setup(o.TRAILER_PARK, o.SHED_YAW)
+		_make_tractor_shed(o.SHED_ROOF)
 		grandpa.tractor = tractor
 	orchard = preload("res://scripts/orchard.gd").new()
 	world.yard_root.add_child(orchard)
@@ -1405,22 +1405,43 @@ func _spawn_farm_extras() -> void:
 	o.apply_view_ranges(forest, 3.0, 45.0)
 
 
-func _make_tractor_shed(p: Vector3) -> void:
-	## Навіс для трактора: чотири стовпи й похилий дах з дощок.
+func _make_tractor_shed(r: Rect2) -> void:
+	## Навіс для комбайна, трактора з плугом і причепа: стовпи по краях і похилий дощаний дах (нижчий ззаду, до забору).
 	var n := Node3D.new()
-	n.position = p
 	world.yard_root.add_child(n)
 	var wood := Util.mat(Color(0.5, 0.35, 0.22), 0.9)
 	var roof := Util.mat(Color(0.45, 0.4, 0.36), 0.8)
-	for sx in [-2.6, 2.6]:
-		for sz in [-1.7, 1.7]:
-			n.add_child(Util.box(Vector3(0.16, 3.4 if sz < 0.0 else 3.1, 0.16), wood, Vector3(sx, (3.4 if sz < 0.0 else 3.1) * 0.5, sz)))
-			Obstacles.add_outer(p.x + sx, p.z + sz, 0.25, 2.5)
-	for sz in [-1.7, 1.7]:
-		n.add_child(Util.box(Vector3(5.6, 0.14, 0.14), wood, Vector3(0, 3.4 if sz < 0.0 else 3.1, sz)))
-	for k in 9:
-		var pl := Util.box(Vector3(0.62, 0.06, 4.2), roof if k % 2 == 0 else wood, Vector3(-2.5 + k * 0.62, 3.32, 0))
-		pl.rotation.x = -0.09
+	var x0 := r.position.x                   # перед (захід, виїзд)
+	var x1 := r.end.x                        # зад (схід, до забору)
+	var z0 := r.position.y
+	var z1 := r.end.y
+	var h0 := 5.6
+	var h1 := 5.0
+	var hx := func(x: float) -> float: return lerpf(h0, h1, (x - x0) / (x1 - x0))
+	var posts: Array = [Vector2(x0, z0), Vector2(x0, z1)]
+	for k in 5:
+		posts.append(Vector2(x1, lerpf(z0, z1, k / 4.0)))
+	for k in range(1, 3):
+		var x := lerpf(x0, x1, k / 3.0)
+		posts.append(Vector2(x, z0))
+		posts.append(Vector2(x, z1))
+	for q in posts:
+		var h: float = hx.call(q.x)
+		n.add_child(Util.box(Vector3(0.24, h, 0.24), wood, Vector3(q.x, h * 0.5, q.y)))
+		Obstacles.add_outer(q.x, q.y, 0.3, 2.5)
+	var lz := z1 - z0
+	var lx := x1 - x0
+	n.add_child(Util.box(Vector3(0.24, 0.34, lz + 0.24), wood, Vector3(x0, h0 - 0.05, (z0 + z1) * 0.5)))
+	n.add_child(Util.box(Vector3(0.2, 0.24, lz + 0.2), wood, Vector3(x1, h1, (z0 + z1) * 0.5)))
+	var tilt := -atan((h0 - h1) / lx)
+	for z in [z0, z1]:
+		var bm := Util.box(Vector3(lx + 0.2, 0.2, 0.2), wood, Vector3((x0 + x1) * 0.5, (h0 + h1) * 0.5, z))
+		bm.rotation.z = tilt
+		n.add_child(bm)
+	var cnt := int(ceil((lz + 0.8) / 0.6))
+	for k in cnt:
+		var pl := Util.box(Vector3(lx + 0.9, 0.06, 0.62), roof if k % 2 == 0 else wood, Vector3((x0 + x1) * 0.5, (h0 + h1) * 0.5 + 0.16, z0 - 0.4 + 0.3 + k * 0.6))
+		pl.rotation.z = tilt
 		n.add_child(pl)
 	Obstacles.finish()
 
@@ -3370,7 +3391,7 @@ func _spawn_ride_things() -> void:
 		combine.name = "Combine"
 		world.yard_root.add_child(combine)
 		combine.position = world.outer.COMBINE_POS
-		combine.rotation.y = PI
+		combine.rotation.y = world.outer.SHED_YAW
 		if not combine.setup():
 			combine.queue_free()
 			combine = null

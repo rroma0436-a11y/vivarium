@@ -556,19 +556,35 @@ func plow_field() -> void:
 
 
 func go_park(route: Array) -> void:
-	# з далекої дороги — спершу до поля (через місток і село, якщо треба), далі звичним шляхом
-	var far := global_position.distance_to(shed_pos) > 25.0
-	var pre: Array = Vehicles.route(global_position, route[0]) if far else []
+	## Дорогою до ферми (з найближчої точки маршруту), а під навіс — заднім ходом: задом до забору, носом до виїзду.
+	var f := Vector3(sin(shed_yaw), 0, cos(shed_yaw))
+	var side := Vector3(f.z, 0, -f.x)
+	var best := 0
+	var bd := INF
+	for i in route.size():
+		var d: float = global_position.distance_to(route[i])
+		if d < bd:
+			bd = d
+			best = i
+	var way: Array = route.slice(best)
+	var pre: Array = Vehicles.route(global_position, way[0]) if bd > 25.0 else []
 	if not pre.is_empty():
 		pre.pop_back()
-	await drive_route(pre + route + [shed_pos + Vector3(0, 0, 2.0)], 3.2)
-	# заднім ходом під навіс не їздимо — просто стаємо носом до виїзду
+	var c := shed_pos + f * 6.0 + side * 5.0
+	await drive_route(pre + way + [shed_pos + f * 12.0 - side * 3.0, shed_pos + f * 6.0 - side * 1.0, c], 3.2)
+	var p0 := global_position
+	var q := shed_pos + f * (p0 - shed_pos).dot(f)
 	var t := 0.0
-	while t < 1.2:
-		t += get_process_delta_time()
-		rotation.y = lerp_angle(rotation.y, shed_yaw, 0.08)
-		global_position = global_position.lerp(shed_pos, 0.06)
+	speed = -1.4
+	while t < 1.0:
+		t = minf(1.0, t + get_process_delta_time() / 5.0)
+		var k := smoothstep(0.0, 1.0, t)
+		var tg := (q - p0) * (1.0 - k) + (shed_pos - q) * k
+		if tg.length() > 0.01:
+			rotation.y = lerp_angle(rotation.y, atan2(-tg.x, -tg.z), 0.2)
+		global_position = p0 * (1.0 - k) * (1.0 - k) + q * (2.0 * k * (1.0 - k)) + shed_pos * (k * k)
 		await get_tree().process_frame
+	speed = 0.0
 	global_position = shed_pos
 	rotation.y = shed_yaw
 	state = "parked"

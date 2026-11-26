@@ -1238,8 +1238,7 @@ func plow_job() -> void:
 	say("Піду поорю поле!", 2.5)
 	if not await _go_outside(id):
 		return
-	await go(Vector3(12.0, 0, 6.0))
-	if id != job:
+	if not await _walk_to_shed(id):
 		return
 	if not await _go_to_tractor(id):
 		return
@@ -1250,7 +1249,7 @@ func plow_job() -> void:
 	tractor.start_engine()
 	say("Ну, Червоненький, поїхали!", 2.5)
 	await wait(1.2)
-	await tractor.drive_route([Vector3(23.0, 0, 4.0)], 3.0)
+	await tractor.drive_route(TRACTOR_OUT_WAY + [Vector3(23.0, 0, 4.0)], 3.2)
 	if id != job:
 		return
 	await tractor.plow_field()
@@ -1258,12 +1257,11 @@ func plow_job() -> void:
 		return
 	say("Ото гарно зорали!", 2.5)
 	Game.emit_event("plowed")
-	await tractor.go_park([Vector3(23.0, 0, 3.2), Vector3(17.5, 0, 2.8), Vector3(15.8, 0, 4.6), Vector3(16.8, 0, 6.0)])
+	await tractor.go_park(TRACTOR_PARK_WAY)
 	await _climb_off(tractor)
 	if id != job:
 		return
-	await go(Vector3(12.0, 0, 6.0))
-	if id != job:
+	if not await _walk_from_shed(id):
 		return
 	if not await _come_back(id):
 		return
@@ -1287,8 +1285,7 @@ func tractor_drive_job() -> void:
 	say("Поїхали на тракторі!", 2.0)
 	if not await _go_outside(id):
 		return
-	await go(Vector3(12.0, 0, 6.0))
-	if id != job:
+	if not await _walk_to_shed(id):
 		return
 	if not await _go_to_tractor(id):
 		return
@@ -1307,12 +1304,11 @@ func tractor_drive_job() -> void:
 	m.vehicle_control_stop()
 	await tractor.end_manual()
 	say("Гарна їзда! Ставимо Червоненького додому.", 2.5)
-	await tractor.go_park([Vector3(23.0, 0, 3.2), Vector3(17.5, 0, 2.8), Vector3(15.8, 0, 4.6), Vector3(16.8, 0, 6.0)])
+	await tractor.go_park(TRACTOR_PARK_WAY)
 	await _climb_off(tractor)
 	if id != job:
 		return
-	await go(Vector3(12.0, 0, 6.0))
-	if id != job:
+	if not await _walk_from_shed(id):
 		return
 	if not await _come_back(id):
 		return
@@ -1322,6 +1318,32 @@ func tractor_drive_job() -> void:
 # дорога від воріт до стайні на фермі за ставком (північніше ставка, повз аеродром)
 const STABLE_WAY := [Vector3(-24.0, 0, 8.5), Vector3(-45.0, 0, 9.0), Vector3(-120.0, 0, 9.0), Vector3(-158.0, 0, 30.0)]
 const FARM_BOUNDS := Rect2(-200.0, -130.0, 245.0, 200.0)     # поза двором — аж до ферми
+# навіс для техніки — на фермі біля східного забору (world_outer.gd → SHED)
+const SHED_WALK := [Vector3(-24.0, 0, 8.5), Vector3(-45.0, 0, 9.0), Vector3(-120.0, 0, 9.0), Vector3(-166.0, 0, 9.0),
+	Vector3(-171.5, 0, 22.0), Vector3(-171.5, 0, 31.0), Vector3(-150.0, 0, 32.0), Vector3(-143.0, 0, 44.5)]
+const TRACTOR_OUT_WAY := [Vector3(-140.3, 0, 45.5), Vector3(-150.0, 0, 34.0), Vector3(-160.0, 0, 31.0), Vector3(-171.5, 0, 31.0),
+	Vector3(-171.5, 0, 22.0), Vector3(-166.0, 0, 9.0), Vector3(-120.0, 0, 9.0), Vector3(-45.0, 0, 9.0), Vector3(-24.0, 0, 9.5), Vector3(12.0, 0, 9.5)]
+const TRACTOR_PARK_WAY := [Vector3(12.0, 0, 9.5), Vector3(-24.0, 0, 9.5), Vector3(-45.0, 0, 9.0), Vector3(-120.0, 0, 9.0), Vector3(-166.0, 0, 9.0),
+	Vector3(-171.5, 0, 22.0), Vector3(-171.5, 0, 31.0), Vector3(-160.0, 0, 31.0), Vector3(-150.0, 0, 34.0)]
+
+
+func _walk_to_shed(id: int) -> bool:
+	bounds = FARM_BOUNDS
+	for wp in SHED_WALK:
+		await go(wp)
+		if id != job:
+			return false
+	return true
+
+
+func _walk_from_shed(id: int) -> bool:
+	bounds = FARM_BOUNDS
+	extra_obs = Obstacles.outer
+	for k in range(SHED_WALK.size() - 1, -1, -1):
+		await go(SHED_WALK[k])
+		if id != job:
+			return false
+	return true
 
 
 func horse_job() -> void:
@@ -1465,8 +1487,7 @@ func forest_job() -> void:
 	bounds = FOREST_BOUNDS
 	var end: Vector3 = FOREST_WAY[FOREST_WAY.size() - 1]
 	if ride:
-		await go(Vector3(12.0, 0, 6.0))
-		if id != job:
+		if not await _walk_to_shed(id):
 			return
 		if not await _go_to_tractor(id):
 			return
@@ -1478,7 +1499,7 @@ func forest_job() -> void:
 		tractor.start_engine()
 		say("Ну, Червоненький, гайда в ліс!", 2.5)
 		await wait(1.0)
-		var there: Array = [Vector3(23.0, 0, 4.0)]
+		var there: Array = TRACTOR_OUT_WAY + [Vector3(23.0, 0, 4.0)]
 		for k in range(3, FOREST_WAY.size()):
 			there.append(FOREST_WAY[k])
 		await tractor.drive_route(there, 3.4)
@@ -1529,12 +1550,11 @@ func forest_job() -> void:
 		for k in range(FOREST_WAY.size() - 2, 2, -1):
 			back.append(FOREST_WAY[k])
 		await tractor.drive_route(back, 3.4)
-		await tractor.go_park([Vector3(23.0, 0, 3.2), Vector3(17.5, 0, 2.8), Vector3(15.8, 0, 4.6), Vector3(16.8, 0, 6.0)])
+		await tractor.go_park(TRACTOR_PARK_WAY)
 		await _climb_off(tractor)
 		if id != job:
 			return
-		await go(Vector3(12.0, 0, 6.0))
-		if id != job:
+		if not await _walk_from_shed(id):
 			return
 		if not await _come_back(id):
 			return

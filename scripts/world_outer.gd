@@ -1763,7 +1763,11 @@ func _near_plow(q: Vector2, w: float) -> bool:
 		if q.distance_to(a + ba * t) < FIELD_ROAD_W / 2.0 + w:
 			return true
 	return false
-const SHED := Vector3(20.5, 0, 5.0)
+# навіс для техніки — на фермі під східним забором (x = −128): усе стоїть задом до забору за 2 м, носом на захід
+const SHED := Vector3(-132.3, 0, 45.5)                 # трактор із плугом
+const SHED_YAW := -PI / 2.0
+const SHED_ROOF := Rect2(-141.2, 36.4, 11.8, 17.2)     # стовпи навісу: x, z, ширина, глибина
+const TRAILER_PARK := Vector3(-131.5, 0, 50.0)
 
 
 func _ok_tree(p: Vector3) -> bool:
@@ -2467,7 +2471,7 @@ static func apply_view_ranges(root: Node, max_size := 14.0, near := 60.0) -> voi
 
 
 # ------------------------------------------------------------------ комбайн біля пшеничного поля (Комбайн.blend)
-const COMBINE_POS := Vector3(36.0, 0, 50.5)
+const COMBINE_POS := Vector3(-135.2, 0, 40.0)        # під навісом на фермі
 var combine_reel: Node3D
 
 
