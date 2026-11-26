@@ -38,7 +38,11 @@ var _esc_dir := Vector3.ZERO
 var _escapes := 0
 
 
+var voice_id := ""                 # чиїм голосом говорить (Util.VOICES)
+
+
 func setup_model(id: String, height: float, map: Dictionary, loops: Array) -> bool:
+	voice_id = id
 	model = Models.spawn(self, id, height)
 	if model == null:
 		return false
@@ -393,6 +397,7 @@ func say(text: String, secs := 3.0) -> void:
 	bubble.text = text
 	bubble.visible = true
 	_bubble_left = secs
+	Util.speak(self, voice_id, text)
 
 
 func _physics_step(delta: float) -> void:

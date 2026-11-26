@@ -203,6 +203,7 @@ func say(text: String, secs := 3.0) -> void:
 	bubble.text = text
 	bubble.visible = true
 	bubble_left = secs
+	Util.speak(self, "beep", text)
 
 
 func happy() -> void:

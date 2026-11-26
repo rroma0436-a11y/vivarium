@@ -453,3 +453,32 @@ static func thing(kind: String) -> Node3D:
 	n.add_child(a)
 	n.set_meta("item_kind", kind)
 	return n
+
+
+# ------------------------------------------------------------------ озвучка реплік (системний голос телефона)
+# кожному своя висота голосу (0…2) і швидкість мовлення
+const VOICES := {
+	"grandpa": [0.6, 0.85], "granny": [1.25, 0.9], "girl": [1.5, 1.05], "kid": [1.6, 1.15], "robot_kid": [1.9, 1.2],
+	"shepherd": [0.8, 0.95], "groom": [0.7, 1.0], "student": [1.1, 1.05], "beep": [2.0, 1.25],
+}
+const VOICE_NEAR := 25.0                 # далі від камери — не чути
+static var _tts_voice := ""
+
+
+static func speak(who: Node3D, id: String, text: String) -> void:
+	## Каже репліку вголос українським голосом телефона (якщо він є і звук не вимкнено).
+	if not VOICES.has(id) or who == null or not who.is_inside_tree() or not who.is_visible_in_tree():
+		return
+	if AudioServer.is_bus_mute(0):
+		return
+	var cam := who.get_viewport().get_camera_3d()
+	if cam == null or cam.global_position.distance_to(who.global_position) > VOICE_NEAR:
+		return
+	if _tts_voice == "":
+		var vs := DisplayServer.tts_get_voices_for_language("uk")
+		if vs.is_empty():
+			return
+		_tts_voice = vs[0]
+	var line := text.replace("z-z-z", "").replace("…", ", ")
+	var v: Array = VOICES[id]
+	DisplayServer.tts_speak(line, _tts_voice, 80, float(v[0]), float(v[1]), 0, true)
