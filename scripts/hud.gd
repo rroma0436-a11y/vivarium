@@ -414,6 +414,9 @@ const GRANDPA_ITEMS := [
 	["gp_plow", "Зорати поле на тракторі", Color(0.8, 0.3, 0.22)],
 	["gp_tractor", "Керувати трактором і плугом самому", Color(0.7, 0.25, 0.2)],
 	["gp_horse", "Запрягти коня з возом", Color(0.6, 0.42, 0.25)],
+	["gp_gcart", "Поїхати возом від садка", Color(0.62, 0.45, 0.28)],
+	["gp_gplow", "Причепити чи зняти плуг", Color(0.5, 0.4, 0.3)],
+	["gp_gfield", "Зорати поле конем", Color(0.55, 0.35, 0.2)],
 	["gp_orchard", "Зібрати фрукти в садку", Color(0.85, 0.5, 0.2)],
 	["gp_forest", "Піти в ліс по гриби та ягоди", Color(0.35, 0.55, 0.3)],
 	["gp_in", "Іти в хату почитати", Color(0.6, 0.45, 0.35)],
@@ -425,7 +428,7 @@ const GRANDPA_ITEMS := [
 func show_grandpa_menu(at_home: bool, busy_outside: bool) -> void:
 	_gp_items["gp_in"].visible = not at_home
 	_gp_items["gp_out"].visible = at_home
-	for k in ["gp_plow", "gp_orchard", "gp_forest", "gp_tractor", "gp_horse"]:
+	for k in ["gp_plow", "gp_orchard", "gp_forest", "gp_tractor", "gp_horse", "gp_gcart", "gp_gplow", "gp_gfield"]:
 		_gp_items[k].visible = not busy_outside
 	move_child(grandpa_menu, get_child_count() - 1)
 	grandpa_menu.visible = true

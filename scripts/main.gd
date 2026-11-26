@@ -644,7 +644,7 @@ func _tap_object(kind: String) -> void:
 				return
 			grandpa.wave_at(rig.cam.global_position)
 			# дідусеві справи — у його власному меню
-			hud.show_grandpa_menu(grandpa.at_home, grandpa.doing in ["plow", "orchard", "forest", "tractor", "cart"])
+			hud.show_grandpa_menu(grandpa.at_home, grandpa.doing in ["plow", "orchard", "forest", "tractor", "cart", "garden"])
 		"bowl":
 			_on_action("feed")
 		"house":
@@ -700,6 +700,8 @@ func _tap_object(kind: String) -> void:
 				audio.play_at("pop", hit_node, -6.0, 1.4)
 		"cart":
 			hud.toast("Щоб поїхати на возі, торкнись дідуся → «Запрягти коня з возом»", 4.0)
+		"garden_cart":
+			hud.toast("Віз із конем біля садка. Торкнись дідуся → «Поїхати возом від садка», «Причепити чи зняти плуг» або «Зорати поле конем»", 5.0)
 		"gold_flower":
 			audio.play("magic_bells", -6.0)
 			hud.toast("Чарівний соняшник із золотих насінинок", 3.0)
@@ -1091,6 +1093,25 @@ func _on_action(name: String) -> void:
 			grandpa.cancel_job()
 			grandpa.horse_job()
 			_follow_later(grandpa)
+		"gp_gcart", "gp_gplow", "gp_gfield":
+			if garden_cart == null:
+				hud.toast("Немає моделі коня чи воза — завантаж на GitHub файл models_11.zip", 5.0)
+				return
+			if name != "gp_gcart" and garden_plow == null:
+				hud.toast("Немає моделі плуга (assets/models/plow.glb)", 4.0)
+				return
+			if grandpa.doing == "sleep" or grandpa.lying:
+				hud.toast("Дідусь спить — кінь почекає до ранку", 3.0)
+				return
+			grandpa.cancel_job()
+			match name:
+				"gp_gcart":
+					grandpa.garden_cart_job()
+				"gp_gplow":
+					grandpa.garden_plow_job()
+				"gp_gfield":
+					grandpa.garden_field_job()
+			_follow_later(grandpa)
 		"gp_orchard":
 			grandpa.cancel_job()
 			grandpa.orchard_job()
@@ -1234,6 +1255,41 @@ var cows: Array = []                                  # корови + бичо�
 var horse
 var horse_cart
 var extra_horses: Array = []                          # коні для масовки (horse2.glb)
+
+
+# віз із конем у упряжі біля дідового садка (східніше тину садка, оглоблями на північ) і кінний плуг поруч
+const GARDEN_CART_PARK := Vector3(23.3, 0, 15.5)
+const GARDEN_PLOW_AT := Vector3(21.5, 0, 16.0)
+var garden_horse
+var garden_cart
+var garden_plow
+
+
+func _spawn_garden_cart(field: Rect2) -> void:
+	if not Models.exists("horse") or not Models.exists("cart"):
+		return
+	garden_cart = preload("res://scripts/cart.gd").new()
+	world.yard_root.add_child(garden_cart)
+	garden_cart.setup(GARDEN_CART_PARK, PI)
+	garden_horse = preload("res://scripts/bull.gd").new()
+	world.yard_root.add_child(garden_horse)
+	var hp: Vector3 = garden_cart.hitch_pos()
+	garden_horse.setup(hp, hp, "horse", 1.75, Rect2(hp.x - 1.0, hp.z - 1.0, 2.0, 2.0))
+	garden_horse.voices = ["І-го-го!", "Пфррр! Поїдемо орати?"]
+	garden_horse.hitch_begin()
+	garden_horse.global_position = hp
+	garden_horse.rotation.y = garden_cart.park_yaw
+	garden_cart.horse = garden_horse
+	garden_cart.hitched = true
+	garden_cart.harness_now()
+	if garden_horse.area:
+		garden_horse.area.set_meta("kind", "garden_cart")
+	if garden_cart.area:
+		garden_cart.area.set_meta("kind", "garden_cart")
+	if Models.exists("plow"):
+		garden_plow = preload("res://scripts/plow.gd").new()
+		world.yard_root.add_child(garden_plow)
+		garden_plow.setup(GARDEN_PLOW_AT, PI, field, tractor)
 
 
 func _cow_way(d: Vector3) -> Array:
@@ -1521,6 +1577,7 @@ func _spawn_farm_extras() -> void:
 	world.yard_root.add_child(orchard)
 	orchard.build()
 	grandpa.orchard = orchard
+	_spawn_garden_cart(o.PLOW_FIELD)
 	forest = preload("res://scripts/forest_goods.gd").new()
 	world.yard_root.add_child(forest)
 	forest.build(o.trees)
@@ -1711,6 +1768,8 @@ func vehicle_control_start(kind: String, veh: Node3D) -> void:
 	if kind == "tractor":
 		hud.flight.land_text = "Причепи"
 		hud.toast("Джойстик — їхати й повертати, ▲ / ▼ — підняти чи опустити плуг (або кузов причепа). «Причепи» — причепити чи відчепити плуг і причіп. «Готово» — поставити трактор додому", 7.0)
+	elif kind == "garden_cart":
+		hud.toast("Джойстик — вести коня з возом. Причеплений плуг у полі оре сам. «Готово» — віз повернеться під садок", 5.0)
 	else:
 		hud.toast("Джойстик — вести коня з возом. «Готово» — повернути коня в стайню", 5.0)
 
@@ -1732,8 +1791,8 @@ func _veh_cam(delta: float) -> void:
 	var v: Node3D = _ctl_veh
 	if _veh_kind == "tractor":
 		tractor.manual_step(j, hud.flight.climb, delta)
-	elif horse_cart:
-		horse_cart.manual_step(j, delta)
+	elif v and v.has_method("manual_step"):
+		v.manual_step(j, delta)
 	rig.focus = v.global_position + Vector3(0, 1.2, 0)
 	rig.target = rig.focus
 	var moving_fast: bool = absf(float(v.get("speed"))) > 0.4
@@ -3986,7 +4045,7 @@ func _mount_follow(delta: float, turning: bool) -> void:
 # вона йде до нього, вітається, той відповідає, далі — звичайні справи цього персонажа (меню).
 # Гриби, ягоди й яблука Ніка збирає сама у свій кошик.
 const NOT_CHARACTERS := ["bike", "saddle_horse", "bz_tack", "trailer", "combine", "tractor", "bz_furn", "girl", "house", "room_exit", "bench",
-	"plane", "bowl", "cart", "gold_flower", "stall", "pies", "well", "terrarium", "drone", "firefly"]
+	"plane", "bowl", "cart", "garden_cart", "gold_flower", "stall", "pies", "well", "terrarium", "drone", "firefly"]
 const BIG_ANIMALS := ["horse", "bull", "cow", "dragon"]
 const SMALL_ANIMALS := ["puppy", "hare", "bird", "gecko", "cat"]
 const NIKA_HI := {

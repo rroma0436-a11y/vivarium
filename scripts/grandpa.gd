@@ -1405,6 +1405,167 @@ func horse_job() -> void:
 	end_job(id)
 
 
+# ------------------------------------------------------------------ віз біля садка (main.gd: garden_cart) і кінний плуг
+const GARDEN_WALK := [Vector3(1.5, 0, 6.2), Vector3(10.5, 0, 6.0), Vector3(21.0, 0, 6.3), Vector3(25.0, 0, 8.0)]
+const GARDEN_BACK := Vector3(25.0, 0, 19.5)              # за возом (звідти підходить до плуга)
+# від воза на дорогу й до поля під оранку
+const GARDEN_TO_FIELD := [Vector3(23.3, 0, 8.0), Vector3(26.0, 0, 5.6), Vector3(71.0, 0, 5.0), Vector3(73.4, 0, 7.0)]
+# заїзд на стоянку: уздовж садка на південь, розворот — і з півдня оглоблями на північ
+const GARDEN_LOOP := [Vector3(24.8, 0, 7.5), Vector3(25.0, 0, 21.0), Vector3(24.0, 0, 25.5), Vector3(22.0, 0, 24.5), Vector3(23.3, 0, 22.6)]
+
+
+func _garden_way_home(cart: Node3D) -> Array:
+	var p: Vector3 = cart.horse.global_position
+	var way: Array
+	if p.x < 20.0:
+		way = Vehicles.route(p, Vector3(1.5, 0, 6.2)) + [Vector3(10.5, 0, 6.0), Vector3(22.0, 0, 5.8)]
+	else:
+		way = Vehicles.route(p, Vector3(30.0, 0, 5.5))
+	return way + GARDEN_LOOP
+
+
+func _walk_to_garden(id: int) -> bool:
+	bounds = FOREST_BOUNDS
+	for wp in GARDEN_WALK:
+		await go(wp)
+		if id != job:
+			return false
+	return true
+
+
+func _walk_from_garden(id: int) -> bool:
+	bounds = FOREST_BOUNDS
+	for k in range(GARDEN_WALK.size() - 1, -1, -1):
+		await go(GARDEN_WALK[k])
+		if id != job:
+			return false
+	if not await _come_back(id):
+		return false
+	end_job(id)
+	return true
+
+
+func _plow_move(id: int, cart: Node3D, plow: Node3D, attach: bool) -> void:
+	## Підходить до чепіг плуга, береться — і чіпляє плуг позаду воза (або знімає й ставить на місце).
+	await go(GARDEN_BACK)
+	if id != job:
+		return
+	await go(plow.to_global(Vector3(0, 0, -1.9)))
+	if id != job:
+		return
+	_face_to = atan2(plow.global_position.x - global_position.x, plow.global_position.z - global_position.z)
+	play("wave", 1.0)
+	await wait(0.6)
+	if id != job:
+		return
+	if attach:
+		await plow.attach(cart)
+	else:
+		await plow.detach()
+	play("idle")
+	await go(GARDEN_BACK)
+
+
+func _ride_garden_cart(id: int, cart: Node3D) -> bool:
+	await go(cart.to_global(Vector3(-1.35, 0, 0.3)))
+	if id != job:
+		return false
+	await _mount(cart)
+	if id != job:
+		_dismount(cart)
+		return false
+	return true
+
+
+func garden_cart_job() -> void:
+	## Дідусь сідає на віз біля садка — гравець кермує конем. «Готово» — кінь сам везе віз під садок.
+	var m := _main()
+	var cart = m.garden_cart
+	if cart == null or cart.horse == null:
+		say("Ех, коня чи воза в нас нема…", 2.5)
+		return
+	var id := begin_job("garden")
+	say("Піду до коня під садок!", 2.5)
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if not await _ride_garden_cart(id, cart):
+		return
+	say("Ну, онучку, кермуй конем! Я — пасажиром.", 2.5)
+	cart.start_manual()
+	m.vehicle_control_start("garden_cart", cart)
+	while id == job and m._ctl_veh == cart:
+		await get_tree().process_frame
+	m.vehicle_control_stop()
+	say("Гарна їзда! Ставимо віз під садок.", 2.5)
+	await cart.drive_back(_garden_way_home(cart))
+	await _dismount(cart)
+	if id != job:
+		return
+	await _walk_from_garden(id)
+
+
+func garden_plow_job() -> void:
+	## Причепити плуг позаду воза або зняти й поставити біля садка.
+	var m := _main()
+	var cart = m.garden_cart
+	var plow = m.garden_plow
+	if cart == null or plow == null:
+		say("Ех, плуга в нас нема…", 2.5)
+		return
+	var attach: bool = plow.cart == null
+	var id := begin_job("garden")
+	say("Причеплю плуга до воза!" if attach else "Зніму плуга з воза!", 2.5)
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	await _plow_move(id, cart, plow, attach)
+	if id != job:
+		return
+	say("Готово — плуг причеплений!" if attach else "Хай плуг постоїть до весни.", 2.5)
+	await _walk_from_garden(id)
+
+
+func garden_field_job() -> void:
+	## Чіпляє плуг (якщо ще ні), сідає на віз, їде на поле й оре конем рядами, потім — назад під садок.
+	var m := _main()
+	var cart = m.garden_cart
+	var plow = m.garden_plow
+	if cart == null or plow == null or cart.horse == null:
+		say("Ех, коня чи плуга в нас нема…", 2.5)
+		return
+	var id := begin_job("garden")
+	say("Поїду орати поле конем!", 2.5)
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if plow.cart == null:
+		await _plow_move(id, cart, plow, true)
+		if id != job:
+			return
+	if not await _ride_garden_cart(id, cart):
+		return
+	say("Но-о, коню! Гайда на поле!", 2.5)
+	for wp in GARDEN_TO_FIELD:
+		await cart._horse_to(wp, 2.6, 1.5)
+		if id != job:
+			break
+	if id == job:
+		say("Оремо!", 1.5)
+		await cart.plow_field(m.world.outer.PLOW_FIELD, func(): return id == job)
+	if id == job:
+		say("Ото гарно зорали конем!", 2.5)
+		Game.emit_event("plowed")
+	await cart.drive_back(_garden_way_home(cart))
+	await _dismount(cart)
+	if id != job:
+		return
+	await _walk_from_garden(id)
+
+
 func _fruit_color(fruit: String) -> Color:
 	## Колір плоду в кошику — за назвою (яблука червоні, груші жовті, сливи фіолетові…).
 	var f := fruit.to_lower()

@@ -177,6 +177,30 @@ func seat_global() -> Vector3:
 	return to_global(SEAT)
 
 
+func plow_hitch() -> Vector3:
+	## Гак позаду воза — сюди чіпляють плуг (plow.gd).
+	return to_global(Vector3(0, 0, -LENGTH * 0.5 - 0.05))
+
+
+func plow_field(f: Rect2, alive: Callable) -> void:
+	## Оранка конем: ряди вздовж z; плуг позаду воза сам заглиблюється в полі, на краях — розворот.
+	var step := 1.8
+	var x := f.position.x + 1.0
+	var x1 := f.end.x - 0.8
+	var zs := f.end.y + 3.2                  # кінь виходить за край, поки плуг дооре ряд
+	var zn := f.position.y - 3.2
+	var north := true
+	await _horse_to(Vector3(x, 0, zs), 1.6, 0.8, false)
+	while horse and alive.call():
+		await _horse_to(Vector3(x, 0, zn if north else zs), 1.5, 0.5, false)
+		if x + step > x1 or not alive.call():
+			break
+		await _horse_to(Vector3(x + step * 0.5, 0, (zn - 2.0) if north else (zs + 2.0)), 1.1, 0.6, false)
+		x += step
+		north = not north
+	speed = 0.0
+
+
 func hitch_pos() -> Vector3:
 	## Де стоїть кінь, коли віз запаркований.
 	return park_pos + Vector3(sin(park_yaw), 0, cos(park_yaw)) * BEHIND
@@ -296,12 +320,12 @@ func manual_step(j: Vector2, dt: float) -> void:
 		horse.global_position.y = Util.hill_y(horse.global_position)
 
 
-func drive_back() -> void:
-	## Гравець віддав віжки: кінь сам везе віз додому до стайні.
+func drive_back(custom: Array = []) -> void:
+	## Гравець віддав віжки: кінь сам везе віз додому до стайні (custom — свій шлях до місця стоянки).
 	speed = 0.0
 	var hp := hitch_pos()
 	var south := Vector3(sin(park_yaw + PI), 0, cos(park_yaw + PI))      # звідки заїжджаємо (позаду воза)
-	var way: Array = Vehicles.route(horse.global_position, hp + south * 9.0)
+	var way: Array = custom if not custom.is_empty() else Vehicles.route(horse.global_position, hp + south * 9.0)
 	for wp in way:
 		await _horse_to(wp, 2.4, 1.2)
 	await _horse_to(hp, 1.4, 0.4, false)
