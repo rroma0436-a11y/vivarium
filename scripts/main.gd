@@ -3856,6 +3856,8 @@ func _mount_drive(delta: float) -> void:
 		vmax = {"walk": 3.0 if fast else 1.6, "trot": 5.0 if fast else 3.4, "gallop": 6.2}.get(_gait, vmax)
 	elif is_bike and _gait == "slow":
 		vmax *= 0.6
+	if _mount_kind == "horse":
+		vmax *= 2.0                               # верхи кінь іде й біжить удвічі швидше
 	var want := 0.0
 	var steer := 0.0
 	if cabv:
@@ -3881,11 +3883,20 @@ func _mount_drive(delta: float) -> void:
 			rate = 0.75 if _mount_kind == "combine" else 1.0
 		if cabv and _mount_v < 0.3:
 			rate *= 0.3 + _mount_v      # машина повертає лише на ходу
-		m.rotation.y = wrapf(m.rotation.y + clampf(turn, -rate * delta, rate * delta), -PI, PI)
+		if _mount_kind == "horse":
+			# кінь повертає плавно: кутова швидкість наростає й спадає поступово
+			_horse_turn_v = lerpf(_horse_turn_v, clampf(turn * 2.0, -rate, rate), 1.0 - exp(-delta * 3.0))
+			m.rotation.y = wrapf(m.rotation.y + _horse_turn_v * delta, -PI, PI)
+		else:
+			m.rotation.y = wrapf(m.rotation.y + clampf(turn, -rate * delta, rate * delta), -PI, PI)
 		steer = clampf(turn, -0.5, 0.5)
 		if absf(turn) > 1.6:
 			want *= 0.35
-	_mount_v = move_toward(_mount_v, want, delta * ((1.2 if cabv else 2.5) if want > _mount_v else (2.0 if cabv else 4.0)))
+	if _mount_kind == "horse" and not (mv.length() > 0.12):
+		_horse_turn_v = lerpf(_horse_turn_v, 0.0, 1.0 - exp(-delta * 4.0))
+		m.rotation.y = wrapf(m.rotation.y + _horse_turn_v * delta, -PI, PI)
+	var acc := (1.2 if cabv else (5.0 if _mount_kind == "horse" else 2.5)) if want > _mount_v else (2.0 if cabv else (6.0 if _mount_kind == "horse" else 4.0))
+	_mount_v = move_toward(_mount_v, want, delta * acc)
 	var old: Vector3 = m.global_position
 	var step := Vector3(sin(m.rotation.y), 0, cos(m.rotation.y)) * _mount_v * delta
 	var rad := 0.4 if is_bike else 0.7
@@ -3936,6 +3947,7 @@ var _cab_steer := 0.0
 var _old_yaw := 0.0
 var _h_yaw := 0.0                       # як стане кінь, коли підбіжить до Ніки
 var _gait := ""                         # кінь: walk / trot / gallop; велосипед: slow / ""
+var _horse_turn_v := 0.0                 # кінь верхи: кутова швидкість повороту (рад/с)
 
 
 func _mount_follow(delta: float, turning: bool) -> void:

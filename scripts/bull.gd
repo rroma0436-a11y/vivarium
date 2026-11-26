@@ -142,14 +142,15 @@ func _process(delta: float) -> void:
 	to.y = 0.0
 	var d := to.length()
 	if d > 0.08:
-		rotation.y = lerp_angle(rotation.y, atan2(to.x, to.z), 1.0 - exp(-delta * 2.5))
+		_turn_to(atan2(to.x, to.z), delta)
 		var fwd := Vector3(sin(rotation.y), 0, cos(rotation.y))
 		var sp := SPEED * speed_k * clampf(fwd.dot(to / d) + 0.3, 0.2, 1.0)
 		position += fwd * minf(sp * delta, d)
-		if speed_k > 1.5 and _a.get("run", "") != "":
-			_play("run", 0.9)
-		else:
-			_play("walk", 0.9 * clampf(speed_k, 1.0, 1.6))
+		if not _gait_play(sp):
+			if speed_k > 1.5 and _a.get("run", "") != "":
+				_play("run", 0.9)
+			else:
+				_play("walk", 0.9 * clampf(speed_k, 1.0, 1.6))
 		if bpose:
 			bpose.peck = lerpf(bpose.peck, 0.0, 0.1)
 		return
@@ -346,7 +347,9 @@ func hitch_move(heading: float, sp: float, dt: float) -> void:
 	rotation.y = heading
 	position += Vector3(sin(heading), 0, cos(heading)) * sp * dt
 	if sp > 0.15:
-		if sp > 2.4 and _a.get("run", "") != "":
+		if _gait_play(sp):
+			pass
+		elif sp > 2.4 and _a.get("run", "") != "":
 			_play("run", clampf(sp / 3.2, 0.7, 1.3))
 		else:
 			_play("walk", clampf(sp / 1.35, 0.5, 1.8))
@@ -412,10 +415,12 @@ func _milk_step(delta: float) -> void:
 	to.y = 0.0
 	var d := to.length()
 	if _milk_walk and d > 0.08:
-		rotation.y = lerp_angle(rotation.y, atan2(to.x, to.z), 1.0 - exp(-delta * 2.5))
+		_turn_to(atan2(to.x, to.z), delta)
 		var fwd := Vector3(sin(rotation.y), 0, cos(rotation.y))
-		position += fwd * minf(SPEED * clampf(fwd.dot(to / d) + 0.3, 0.2, 1.0) * delta, d)
-		_play("walk", 0.9)
+		var sp := SPEED * clampf(fwd.dot(to / d) + 0.3, 0.2, 1.0)
+		position += fwd * minf(sp * delta, d)
+		if not _gait_play(sp):
+			_play("walk", 0.9)
 		return
 	_milk_walk = false
 	_play("idle")
@@ -595,3 +600,104 @@ func _reins_draw() -> void:
 			im.surface_add_vertex(p - side)
 			prev = p
 	im.surface_end()
+
+
+# ------------------------------------------------------------------ хода без ковзання й плавні повороти
+var _yaw_v := 0.0                       # кутова швидкість повороту (рад/с)
+var _nat := {}                          # рух → скільки метрів за секунду «проходять» ноги в анімації (при швидкості 1)
+var _gait_cur := ""
+
+
+func _turn_to(want: float, delta: float, max_rate := 1.1) -> void:
+	## Поворот, як у справжньої тварини: кутова швидкість наростає й спадає поступово, без ривків.
+	var diff := angle_difference(rotation.y, want)
+	var rate := clampf(diff * 1.8, -max_rate, max_rate)
+	_yaw_v = lerpf(_yaw_v, rate, 1.0 - exp(-delta * 3.0))
+	rotation.y = wrapf(rotation.y + _yaw_v * delta, -PI, PI)
+
+
+func _gait_play(sp: float) -> bool:
+	## Крок → рись → галоп за швидкістю; анімація крутиться саме так швидко, щоб копита на землі стояли, а не ковзали.
+	if _nat.is_empty():
+		_measure_gaits()
+	var list: Array = []
+	for k in ["walk", "trot", "run"]:
+		if float(_nat.get(k, 0.0)) > 0.05:
+			list.append(k)
+	if list.is_empty():
+		return false
+	var cur := _gait_cur if _gait_cur in list else String(list[0])
+	var i := list.find(cur)
+	# перемикаємо з запасом (щоб не смикалося туди-сюди на межі)
+	while i < list.size() - 1 and sp > sqrt(float(_nat[list[i]]) * float(_nat[list[i + 1]])) * 1.1:
+		i += 1
+	while i > 0 and sp < sqrt(float(_nat[list[i - 1]]) * float(_nat[list[i]])) * 0.9:
+		i -= 1
+	_gait_cur = list[i]
+	_play(_gait_cur, clampf(sp / float(_nat[_gait_cur]), 0.3, 4.0))
+	return true
+
+
+func _measure_gaits() -> void:
+	## Міряємо по самій анімації: поки копито стоїть на землі, тіло над ним іде вперед якраз із тією швидкістю,
+	## з якою треба рухати тварину.
+	_nat["measured"] = 1.0
+	if ap == null or model == null or not is_inside_tree():
+		return
+	var sks := model.find_children("*", "Skeleton3D", true, false)
+	if sks.is_empty():
+		return
+	var sk: Skeleton3D = sks[0]
+	var hoofs: Array = []
+	for i in sk.get_bone_count():
+		if sk.get_bone_name(i).to_lower().contains("hoof"):
+			hoofs.append(i)
+	if hoofs.is_empty():
+		return
+	var cur := ap.current_animation
+	var cur_t := ap.current_animation_position if cur != "" else 0.0
+	var M := global_transform.affine_inverse() * sk.global_transform
+	for k in ["walk", "trot", "run"]:
+		var an: String = _a.get(k, "")
+		if an == "" or not ap.has_animation(an):
+			continue
+		var L := ap.get_animation(an).length
+		if L < 0.05:
+			continue
+		const N := 48
+		var tracks: Array = []
+		for h in hoofs:
+			tracks.append([])
+		ap.play(an)
+		for s in N:
+			ap.seek(L * s / float(N), true)
+			var r0 := M * sk.get_bone_global_pose(0).origin
+			for hi in hoofs.size():
+				var p: Vector3 = M * sk.get_bone_global_pose(hoofs[hi]).origin
+				(tracks[hi] as Array).append(Vector3(p.x - r0.x, p.y, p.z - r0.z))
+		var speeds: Array = []
+		var dt := L / float(N)
+		for tr in tracks:
+			var lo := INF
+			var hi_y := -INF
+			for p in tr:
+				lo = minf(lo, (p as Vector3).y)
+				hi_y = maxf(hi_y, (p as Vector3).y)
+			var vs: Array = []
+			for s in N:
+				var a: Vector3 = tr[s]
+				var b: Vector3 = tr[(s + 1) % N]
+				if a.y <= lo + (hi_y - lo) * 0.25 and b.y <= lo + (hi_y - lo) * 0.25:
+					vs.append(-(b.z - a.z) / dt)
+			if vs.size() >= 3:
+				vs.sort()
+				speeds.append(vs[vs.size() / 2])
+		if speeds.is_empty():
+			continue
+		speeds.sort()
+		var v: float = absf(float(speeds[speeds.size() / 2]))
+		if v > 0.05:
+			_nat[k] = v
+	if cur != "":
+		ap.play(cur)
+		ap.seek(cur_t, true)
