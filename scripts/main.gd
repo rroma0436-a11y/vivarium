@@ -1296,6 +1296,7 @@ func _spawn_garden_cart(field: Rect2) -> void:
 	garden_horse.setup(pc, pc, "horse", 1.75, GARDEN_PADDOCK)
 	garden_horse.voices = ["І-го-го!", "Пфррр! Поїдемо орати?"]
 	garden_horse.stay_out = true
+	garden_horse.stand_still = true
 	if garden_horse.area:
 		garden_horse.area.set_meta("kind", "garden_cart")
 	if garden_cart.area:

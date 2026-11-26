@@ -2178,15 +2178,19 @@ const SHOP_GEAR := {"rod": Vector3(-17.1, 0, 0.05), "stool": Vector3(-16.4, 0, -
 const SHOP_STAND := Vector3(-15.2, 0, -1.1)              # де стати в майстерні, щоб узяти вудку, стільчик, відро
 const BARN_SACKS := Vector3(-14.7, 0, -9.6)              # мішки з пшеницею в сараї, біля дверей
 const BARN_REACH := Vector3(-15.0, 0, -8.5)
-const GATE_STOP := Vector3(4.0, 0, 10.2)                 # віз біля воріт подвір'я
-const TO_WEST := [Vector3(23.3, 0, 8.0), Vector3(14.0, 0, 9.6)]
+const GATE_STOP := Vector3(-6.0, 0, 9.2)                 # віз перед подвір'ям, кінь — на захід від воріт
+# від стоянки — в обхід садка: на південь уздовж садка, дорогою на захід до сільської дороги
+const OUT_SOUTH := [Vector3(23.3, 0, 11.0), Vector3(26.6, 0, 13.0), Vector3(26.8, 0, 22.0), Vector3(25.5, 0, 30.5),
+	Vector3(12.0, 0, 32.5), Vector3(3.0, 0, 31.0)]
+const GATE_WAY := [Vector3(2.0, 0, 20.0), Vector3(1.8, 0, 12.5)]       # сільською дорогою на північ — до подвір'я
+const HOME_SOUTH := [Vector3(12.0, 0, 32.5), Vector3(25.5, 0, 30.5)]    # назад — тією ж дорогою за садком
+const FROM_SOUTH := [Vector3(25.8, 0, 26.0), Vector3(23.4, 0, 22.8)]    # заїзд на стоянку з півдня
 const TO_EAST := [Vector3(23.3, 0, 8.0), Vector3(26.0, 0, 5.6)]
-const VILLAGE_DOWN := [Vector3(3.0, 0, 10.5), Vector3(2.5, 0, 30.0), Vector3(5.5, 0, 50.0), Vector3(5.5, 0, 68.0), Vector3(2.2, 0, 82.0)]
-const VILLAGE_UP := [Vector3(5.5, 0, 68.0), Vector3(5.5, 0, 50.0), Vector3(2.5, 0, 30.0), Vector3(3.0, 0, 12.0),
-	Vector3(14.0, 0, 9.6), Vector3(22.0, 0, 6.5)]
-const POND_ROAD_HOME := [Vector3(-2.0, 0, 29.0), Vector3(2.5, 0, 18.0), Vector3(8.0, 0, 11.0), Vector3(14.0, 0, 9.6), Vector3(22.0, 0, 6.5)]
-const NORTH_HOME := [Vector3(-160.0, 0, 9.5), Vector3(-120.0, 0, 9.5), Vector3(-45.0, 0, 10.0), Vector3(-24.0, 0, 10.5),
-	Vector3(-5.0, 0, 11.0), Vector3(12.0, 0, 9.6), Vector3(22.0, 0, 6.5)]
+const VILLAGE_DOWN := [Vector3(5.5, 0, 50.0), Vector3(5.5, 0, 68.0), Vector3(2.2, 0, 82.0)]
+const VILLAGE_UP := [Vector3(5.5, 0, 68.0), Vector3(5.5, 0, 50.0), Vector3(3.0, 0, 36.0), Vector3(12.0, 0, 32.5), Vector3(25.5, 0, 30.5)]
+const POND_ROAD_HOME := [Vector3(-2.0, 0, 29.5), Vector3(3.0, 0, 32.0), Vector3(12.0, 0, 32.5), Vector3(25.5, 0, 30.5)]
+const NORTH_HOME := [Vector3(-160.0, 0, 9.5), Vector3(-120.0, 0, 9.5), Vector3(-45.0, 0, 10.0), Vector3(-24.0, 0, 9.8),
+	Vector3(-6.0, 0, 11.5), Vector3(1.5, 0, 20.0), Vector3(3.0, 0, 31.0), Vector3(12.0, 0, 32.5), Vector3(25.5, 0, 30.5)]
 const FARM_HAY_STOP := Vector3(-172.0, 0, 34.0)
 const SHOP_ASK := {"bread": "Дайте паляницю й булочок!", "sausage": "Мені кільце ковбаски, будь ласка!", "fruit": "І яблучок для онуків!"}
 const SHOP_COL := {"bread": Color(0.85, 0.62, 0.3), "sausage": Color(0.6, 0.2, 0.15), "fruit": Color(0.85, 0.15, 0.1)}
@@ -2217,7 +2221,7 @@ func _make_trip_props() -> void:
 	var stool := Node3D.new()
 	stool.name = "FishStool"
 	root.add_child(stool)
-	if Models.spawn(stool, "stool", 0.34) == null:
+	if Models.spawn(stool, "stool", 0.3) == null:
 		stool.add_child(Util.cyl(0.16, 0.16, 0.04, wood, Vector3(0, 0.32, 0)))
 		for i in 3:
 			var a := TAU * i / 3.0
@@ -2504,7 +2508,8 @@ func _drive(id: int, cart: Node3D, way: Array, v := 2.6) -> bool:
 
 func _park_home(id: int, cart: Node3D) -> bool:
 	## Під садок, на стоянку (оглоблями на північ).
-	if not await _drive(id, cart, GARDEN_LOOP, 2.2):
+	var h0: Node3D = cart.horse
+	if not await _drive(id, cart, FROM_SOUTH if h0 and h0.global_position.z > 18.0 else GARDEN_LOOP, 2.2):
 		return false
 	var hp: Vector3 = cart.hitch_pos()
 	if not await _horse_go(id, cart, hp, 1.3, 0.4, false):
@@ -2643,6 +2648,7 @@ func _trip_abort() -> void:
 			h.hitch_release()
 		h.global_position = GARDEN_PADDOCK
 		h.rotation.y = 0.0
+		h._target = h.position
 	if not at_home and not YARD_BOUNDS.grow(0.5).has_point(Vector2(global_position.x, global_position.z)):
 		position = spots["inside_gate"]
 		bounds = YARD_BOUNDS
@@ -2750,7 +2756,7 @@ func _market_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
 		return
 	if not await _hitch_and_mount(id, cart, h):
 		return
-	if not await _drive(id, cart, TO_WEST + VILLAGE_DOWN + [Vector3(1.6, 0, 90.0)]):
+	if not await _drive(id, cart, OUT_SOUTH + VILLAGE_DOWN + [Vector3(1.6, 0, 90.0)]):
 		return
 	if not await _get_off(id, cart):
 		return
@@ -2910,8 +2916,7 @@ func _fish_trip(id: int, cart: Node3D, h: Node3D) -> void:
 		return
 	var park := _pier_pt(-5.5)
 	say("Гайда на ставок!", 2.0)
-	if not await _drive(id, cart, TO_WEST + [Vector3(3.0, 0, 10.5), Vector3(-1.0, 0, 20.0), Vector3(-2.0, 0, 29.0),
-			Vector3(-36.0, 0, 25.0), Vector3(-41.0, 0, 36.0), park]):
+	if not await _drive(id, cart, OUT_SOUTH + [Vector3(-2.0, 0, 29.5), Vector3(-36.0, 0, 25.0), Vector3(-41.0, 0, 36.0), park]):
 		return
 	if not await _get_off(id, cart):
 		return
@@ -2961,7 +2966,7 @@ func _fish_trip(id: int, cart: Node3D, h: Node3D) -> void:
 	_face_to = yaw
 	await wait(0.6)
 	rotation.y = yaw
-	await _sit_down("stool", seat_p, -0.1)
+	await _sit_down("stool", seat_p, 0.0)
 	if id != job:
 		return
 	_show_line(seat_p + fwd * 3.4)
@@ -3012,7 +3017,7 @@ func _mill_trip(id: int, cart: Node3D, h: Node3D) -> void:
 		return
 	if not await _hitch_and_mount(id, cart, h):
 		return
-	if not await _drive(id, cart, TO_WEST + [GATE_STOP]):
+	if not await _drive(id, cart, OUT_SOUTH + GATE_WAY + [GATE_STOP]):
 		return
 	if not await _get_off(id, cart):
 		return
@@ -3026,7 +3031,7 @@ func _mill_trip(id: int, cart: Node3D, h: Node3D) -> void:
 	var dv := Vector3(0.4472136, 0, 0.8944272)            # від млина вздовж дороги вниз
 	var sd := Vector3(dv.z, 0, -dv.x)
 	say("Гайда до млина на пагорбі!", 2.5)
-	if not await _drive(id, cart, [Vector3(-3.0, 0, 13.0), Vector3(-2.0, 0, 24.0), Vector3(-2.0, 0, 29.0), Vector3(-46.0, 0, 22.0),
+	if not await _drive(id, cart, [Vector3(-20.0, 0, 9.5), Vector3(-36.0, 0, 9.5), Vector3(-44.0, 0, 13.0), Vector3(-58.5, 0, -3.0),
 			c + dv * 34.0, c + dv * 20.0, c + dv * 9.5], 2.4):
 		return
 	if not await _get_off(id, cart):
@@ -3099,7 +3104,7 @@ func _sow_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
 		return
 	if not await _hitch_and_mount(id, cart, h):
 		return
-	if not await _drive(id, cart, TO_WEST + [GATE_STOP]):
+	if not await _drive(id, cart, OUT_SOUTH + GATE_WAY + [GATE_STOP]):
 		return
 	if not await _get_off(id, cart):
 		return
@@ -3114,8 +3119,9 @@ func _sow_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
 	if not await _hitch_and_mount(id, cart, h):
 		return
 	say("Гайда на поле!", 2.0)
-	if not await _drive(id, cart, [Vector3(-4.0, 0, 12.0), Vector3(-3.0, 0, 20.0), Vector3(4.0, 0, 22.0), Vector3(9.0, 0, 14.0),
-			Vector3(14.0, 0, 9.6), Vector3(22.0, 0, 7.5)] + GARDEN_TO_FIELD.slice(1)):
+	if not await _drive(id, cart, [Vector3(-12.0, 0, 10.5), Vector3(-12.0, 0, 15.0), Vector3(-5.0, 0, 18.0), Vector3(1.5, 0, 22.0),
+			Vector3(2.5, 0, 30.0), Vector3(12.0, 0, 32.5), Vector3(25.5, 0, 30.5), Vector3(26.8, 0, 22.0), Vector3(26.8, 0, 9.0)] +
+			GARDEN_TO_FIELD.slice(1)):
 		return
 	if not await _get_off(id, cart):
 		return
@@ -3236,7 +3242,7 @@ func _farm_trip(id: int, m: Node, cart: Node3D, h: Node3D) -> void:
 		return
 	if not await _hitch_and_mount(id, cart, h):
 		return
-	if not await _drive(id, cart, TO_WEST + VILLAGE_DOWN + [Vector3(-3.0, 0, 93.0), Vector3(-12.0, 0, 95.0), Vector3(-160.0, 0, 95.0),
+	if not await _drive(id, cart, OUT_SOUTH + VILLAGE_DOWN + [Vector3(-3.0, 0, 93.0), Vector3(-12.0, 0, 95.0), Vector3(-160.0, 0, 95.0),
 			Vector3(-171.5, 0, 89.0), Vector3(-171.5, 0, 78.0)]):
 		return
 	if not await _get_off(id, cart):

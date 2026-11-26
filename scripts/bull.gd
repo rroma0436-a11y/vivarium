@@ -8,6 +8,7 @@ var voices := ["Му-у-у!", "Мууу! Привіт!", "Му! Трава см�
 var kind := "bull"
 var night_from := 20.0
 var stay_out := false                   # ночує надворі (кінь біля садка — стайні там нема)
+var stand_still := false                # сам не ходить (кінь біля садка — стоїть, поки не запряжуть)
 var speed_k := 1.0
 var _inside_p := Vector3.ZERO           # де стоїть у сараї (невидимий)
 var door := Vector3(7.0, 0, -21.5)
@@ -192,7 +193,7 @@ func _process(delta: float) -> void:
 	var r := randf()
 	if r < 0.45:
 		_graze = randf_range(4.0, 9.0)
-	elif r < 0.85:
+	elif r < 0.85 and not stand_still:
 		_target = Vector3(randf_range(pasture.position.x, pasture.end.x), 0, randf_range(pasture.position.y, pasture.end.y))
 	elif r < 0.95:
 		say(voices[randi() % voices.size()], 2.0)
