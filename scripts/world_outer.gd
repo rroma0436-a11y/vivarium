@@ -486,9 +486,7 @@ func _make_farm_paths() -> void:
 	var mi := MeshInstance3D.new()
 	mi.name = "farm_paths"
 	mi.mesh = st.commit()
-	var m := Util.mat(Color(0.45, 0.29, 0.16), 1.0)
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mi.material_override = m
+	mi.material_override = Util.road_mat()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	# заїзд з піщаної дороги біля річки до південних воріт

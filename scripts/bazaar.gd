@@ -88,6 +88,11 @@ func build() -> void:
 			for c in n.find_children("Лавка*", "", true, false):
 				c.get_parent().remove_child(c)
 				c.free()
+		if f == "bz_stalls":
+			var fs := n.find_child("Продавець_Риба", true, false)
+			if fs:
+				fs.get_parent().remove_child(fs)
+				fs.free()
 		if f == "bz_mill":
 			var mn := n.get_node_or_null("Млин") as Node3D
 			if mn:     # на вершині пагорба (замість вітряка), входом до дороги
@@ -885,10 +890,32 @@ func _path_piece(lib: Node, holder: Node3D, inv: Transform3D, pos: Vector3, bs: 
 	var L2 := p0.distance_to(p1)
 	if L2 < 0.4:
 		return
-	var dir := (p1 - p0) / L2
-	var e1 := p1 + dir * 0.45
-	var by := Basis(Vector3.UP, atan2(dir.x, dir.z))
-	_vput(lib, holder, inv, "Стежка_10м", Transform3D(bs * by * Basis.from_scale(Vector3(1.0, 1.0, (L2 + 0.9) / 10.0)), pos + bs * e1))
+	const PW := 0.6                                   # пів ширини стежки
+	const PY := 0.025
+	var a := pos + bs * p0
+	var b := pos + bs * p1
+	var d2 := Vector2(b.x - a.x, b.z - a.z).normalized()
+	var sd := Vector3(-d2.y, 0, d2.x) * PW
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts: Array = [a + sd, b + sd, a - sd, a - sd, b + sd, b - sd]
+	# круглі кінці — шматки зливаються на зламах і перехрестях без щілин і кутів
+	for c in [a, b]:
+		for k in 20:
+			var a0 := TAU * k / 20.0
+			var a1 := TAU * (k + 1) / 20.0
+			pts.append(c)
+			pts.append(c + Vector3(cos(a1), 0, sin(a1)) * PW)
+			pts.append(c + Vector3(cos(a0), 0, sin(a0)) * PW)
+	for v in pts:
+		st.set_normal(Vector3.UP)
+		st.add_vertex(inv * Vector3((v as Vector3).x, PY, (v as Vector3).z))
+	var mi := MeshInstance3D.new()
+	mi.name = "Стежка"
+	mi.mesh = st.commit()
+	mi.material_override = Util.road_mat()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	holder.add_child(mi, true)
 
 
 func _road_grid() -> Dictionary:
@@ -1122,7 +1149,7 @@ func _village_props() -> void:
 			_solid(hay as MeshInstance3D, true)
 		if wo and "_obst" in wo:
 			wo._obst.append([hp.x, hp.z, 1.1, 2.0])
-	var well := _vput(lib, holder, inv, "Криниця_журавель", Transform3D(Basis(Vector3.UP, 0.4), VILLAGE_WELL))
+	var well: Node3D = null      # криниця з журавлем стирчала з кута хати старого села — прибрано
 	if well:
 		for nm in ["Криниця_зруб", "Журавель_стовп"]:
 			var m := well.find_child(nm + "*", true, false) as MeshInstance3D
