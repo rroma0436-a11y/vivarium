@@ -972,6 +972,7 @@ func _path_piece(lib: Node, holder: Node3D, inv: Transform3D, pos: Vector3, bs: 
 			pts.append(c)
 			pts.append(c + Vector3(cos(a1), 0, sin(a1)) * PW)
 			pts.append(c + Vector3(cos(a0), 0, sin(a0)) * PW)
+	pts.reverse()                                     # лицем угору (інакше видно зворот — темна смуга)
 	for v in pts:
 		st.set_normal(Vector3.UP)
 		st.add_vertex(inv * Vector3((v as Vector3).x, PY, (v as Vector3).z))
