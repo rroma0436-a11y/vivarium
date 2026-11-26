@@ -277,12 +277,11 @@ func _spawn_characters() -> void:
 		kid.position = Vector3(-2.5, 0, 2.0)
 		kid.setup("kid", 1.15, {"idle": ["idle_022", "idle_02"], "walk": ["walk"], "run": ["run"], "talk": ["listening"]},
 			["idle", "walk", "run"],
-			["Привіт! Я Тарасик, живу через дорогу.", "А Бім уміє приносити м'ячик?", "Я ношу воду з криниці — я сильний!", "Дідусь каже, що гарбузи вже майже великі!", "Хочеш, покажу, де жаби в ставку?"],
-			[Vector3(-2.5, 0, 2.5), Vector3(-2.0, 0, 3.0), Vector3(1.5, 0, 0.5), Vector3(-6.0, 0, -1.0), Vector3(-10.0, 0, -4.0), Vector3(-12.0, 0, -7.5)], "npc")
+			["Привіт! Я Тарасик, живу в селі.", "Я працюю на фермі — годую корів і коней!", "У корівнику треба прибирати щодня.", "Сіно з копиці — коникам найсмачніше!", "Я ношу воду з криниці — я сильний!"],
+			[], "npc")
 		Models.give_nika_anims(kid.ap, kid.anims)
 		kid.setup_pose()
 		kid.make_bucket()
-		_lives_outside(kid)
 	if Models.exists("robot_kid"):
 		gvintyk = preload("res://scripts/gvintyk.gd").new()
 		gvintyk.main = self
@@ -290,12 +289,11 @@ func _spawn_characters() -> void:
 		gvintyk.position = Vector3(5.6, 0, -2.6)
 		gvintyk.setup("robot_kid", 0.9, {"idle": ["idle"], "walk": ["walk"], "run": ["run"], "dance": ["dance"]},
 			["idle", "walk", "run", "dance"],
-			["Біп! Я Гвинтик — молодший помічник.", "Зарядився на 100%!", "Можна я потанцюю? Біп-біп!", "Я ношу дрова й збираю яйця!"],
-			[Vector3(5.6, 0, -2.6), Vector3(4.0, 0, 0.5), Vector3(6.5, 0, -6.0), Vector3(2.5, 0, -3.5), Vector3(-13.0, 0, -2.0), Vector3(-15.0, 0, -7.5)], "npc")
+			["Біп! Я Гвинтик — механік ферми.", "Зарядився на 100%!", "Трактор полагоджено — тепер випробуємо! Біп!", "Гайки підкручені, мастило є!"],
+			[], "npc")
 		Models.give_nika_anims(gvintyk.ap, gvintyk.anims)
 		gvintyk.setup_pose()
 		gvintyk.make_props()
-		_lives_outside(gvintyk)
 	if Models.exists("drone"):
 		drone = preload("res://scripts/drone.gd").new()
 		world.yard_root.add_child(drone)
@@ -813,7 +811,12 @@ func _tap_object(kind: String) -> void:
 					kid.face(rig.cam.global_position)
 				hud.show_kid_menu(false)      # будь-яку нову справу можна замовити й під час іншої
 			elif best and best == gvintyk and qid == "eggs" and gvintyk.doing == "":
-				gvintyk.eggs_job()
+				gvintyk.command("eggs")
+			elif best and best in [gvintyk, shepherd, groom]:
+				audio.play_at("robot_beep" if best == gvintyk else "question", best, -4.0)
+				if best.doing == "" and not best.moving and best.get("riding") == null:
+					best.face(rig.cam.global_position)
+				hud.show_worker_menu("gvintyk" if best == gvintyk else ("shepherd" if best == shepherd else "groom"))
 			elif best:
 				best.talk(rig.cam.global_position)
 				audio.play_at("robot_beep" if "robot" in str(best.model) else "question", best, -4.0)
@@ -1010,20 +1013,30 @@ func _on_action(name: String) -> void:
 				audio.play_at("question", kid, -4.0)
 		"kid_water", "water":
 			if kid:
-				kid.cancel_job()
 				kid.say("Зараз принесу води!", 2.0)
-				kid.water_job()
+				kid.command("water")
 				_follow_later(kid)
-		"kid_play":
+		"kid_feed", "kid_clean":
 			if kid:
-				kid.cancel_job()
-				kid.play_with_bim()
+				kid.command("feed" if name == "kid_feed" else "clean")
 				_follow_later(kid)
-		"kid_field":
-			if kid:
-				kid.cancel_job()
-				kid.look_at_field()
-				_follow_later(kid)
+		"sh_out", "sh_in":
+			if shepherd:
+				shepherd.command("out" if name == "sh_out" else "in")
+				_follow_later(shepherd)
+		"gm_out", "gm_in", "gm_hay":
+			if groom:
+				groom.command({"gm_out": "out", "gm_in": "in", "gm_hay": "hay"}[name])
+				_follow_later(groom)
+		"gv_repair", "gv_test", "gv_eggs":
+			if gvintyk:
+				gvintyk.command({"gv_repair": "repair", "gv_test": "test", "gv_eggs": "eggs"}[name])
+				_follow_later(gvintyk)
+		"sh_talk", "gm_talk", "gv_talk":
+			var who = {"sh_talk": shepherd, "gm_talk": groom, "gv_talk": gvintyk}[name]
+			if who:
+				who.talk(rig.cam.global_position)
+				audio.play_at("robot_beep" if who == gvintyk else "question", who, -4.0)
 		"girl_talk":
 			if girl:
 				girl.talk(rig.cam.global_position)
@@ -1204,6 +1217,7 @@ func _map_markers() -> Array:
 const COW_DOORS := [Vector3(-166.9, 0, 39.0), Vector3(-166.9, 0, 55.0), Vector3(-166.9, 0, 71.0)]     # біля дверей трьох корівників (зовні)
 const COW_DOOR := Vector3(-166.9, 0, 55.0)            # середній корівник (пастух виганяє звідси)
 const COW_PASTURE := Rect2(-153.0, 57.0, 22.0, 18.0)    # пасовисько перед корівниками (на південь від навісу для техніки)
+const COW_BACK := Vector3(10.5, 0, 0)                  # від передніх дверей корівника до задніх воріт (з боку пасовиська)
 const HORSE_DOORS := [Vector3(-187.0, 0, 39.7), Vector3(-187.0, 0, 55.7), Vector3(-187.0, 0, 71.7)]  # біля дверей трьох стаєнь
 const HORSE_DOOR := Vector3(-187.0, 0, 39.7)           # перша стайня (кінь для воза)
 const HORSE_PADDOCK := Rect2(-182.0, 36.0, 14.0, 36.0)   # левада перед стайнями
@@ -1224,6 +1238,7 @@ func _spawn_cattle() -> void:
 		world.yard_root.add_child(bull)
 		bull.setup(Vector3(-145.0, 0, 65.0), COW_DOORS[0], "bull", 1.55, COW_PASTURE)
 		bull.door_in = Vector3(3.0, 0, 0)
+		bull.back_door = COW_DOORS[0] + COW_BACK
 		cows.append(bull)
 	if Models.exists("cow"):
 		var names := ["Зірка", "Ласка", "Квітка", "Красуля", "Мілка"]
@@ -1232,6 +1247,7 @@ func _spawn_cattle() -> void:
 			world.yard_root.add_child(c)
 			c.setup(Vector3(rng.randf_range(-151.0, -133.0), 0, rng.randf_range(58.0, 73.0)), COW_DOORS[(i + 1) % COW_DOORS.size()], "cow", rng.randf_range(1.35, 1.5), COW_PASTURE)
 			c.door_in = Vector3(3.0, 0, rng.randf_range(-0.6, 0.6))
+			c.back_door = COW_DOORS[(i + 1) % COW_DOORS.size()] + COW_BACK + Vector3(0, 0, rng.randf_range(-0.6, 0.6))
 			c.voices = ["Му-у-у! Я — %s." % names[i], "Мууу!", "Му-у! Молочко буде!"]
 			c.night_from = 19.8 + i * 0.08
 			c.set_meta("name", names[i])
@@ -1288,28 +1304,72 @@ var shepherd
 
 
 func _spawn_workers() -> void:
-	## Бабуся (живе з дідом), конюх Семен і пастух Іван (живуть у хатах біля базару).
-	var V: Vector3 = world.outer.VILLAGE
+	## Бабуся (живе з дідом). Тарасик, Гвинтик, пастух Іван і конюх Семен живуть у хатах села
+	## (по дві з кожного боку дороги біля фонтану) і щоранку ходять на ферму за ставком працювати.
+	_make_farm_hay()
 	if Models.exists("granny"):
 		granny = preload("res://scripts/granny.gd").new()
 		granny.name = "Granny"
 		granny.main = self
 		world.yard_root.add_child(granny)
 		granny.setup_granny(world.spots)
+	var in_farm := [Vector3(-171.5, 0, 20.0)]
 	if Models.exists("groom") and horse:
 		groom = preload("res://scripts/groom.gd").new()
 		groom.name = "Groom"
 		groom.main = self
 		world.yard_root.add_child(groom)
-		groom.setup_groom(V + Vector3(18.2, 0, -15.0),
-			[Vector3(0, 0, 44), Vector3(0, 0, 12)] + FARM_WAY + [Vector3(-174, 0, 36.0)])
+		groom.setup_groom(_home_door(1.0, 1), _home_way(1.0, 1) + in_farm + [Vector3(-174, 0, 36.0)])
 	if Models.exists("shepherd") and not cows.is_empty():
 		shepherd = preload("res://scripts/shepherd.gd").new()
 		shepherd.name = "Shepherd"
 		shepherd.main = self
 		world.yard_root.add_child(shepherd)
-		shepherd.setup_shepherd(COW_DOOR, COW_PASTURE, V + Vector3(-18.2, 0, 15.0),
-			[Vector3(-3, 0, 72), Vector3(3, 0, 44), Vector3(0, 0, 12)] + FARM_WAY + [Vector3(-172, 0, 9.0), Vector3(-171.5, 0, 24.0), Vector3(-171.5, 0, 33.0)])
+		shepherd.setup_shepherd(COW_DOOR, COW_PASTURE, _home_door(-1.0, 1),
+			_home_way(-1.0, 1) + in_farm + [Vector3(-171.5, 0, 31.0), Vector3(-152.0, 0, 32.0)])
+	if kid:
+		kid.start_farm(_home_door(1.0, 0), _home_way(1.0, 0) + in_farm + [Vector3(-172.0, 0, 33.0)], 7.0, 19.0, 4)
+	if gvintyk:
+		gvintyk.start_farm(_home_door(-1.0, 0), _home_way(-1.0, 0) + in_farm + [Vector3(-171.5, 0, 31.0), Vector3(-152.0, 0, 32.0), Vector3(-143.0, 0, 46.0)], 7.2, 19.2, 4)
+
+
+func _home_door(sx: float, row: int) -> Vector3:
+	## Перед ґанком хати села (sx: −1 — захід дороги, 1 — схід; row: 0 — ближча до фонтану з півночі, 1 — південніша).
+	var o = world.outer
+	return Vector3(sx * (o.HUT_X - 4.2), 0, o.HUT_Z0 + o.HUT_STEP * row)
+
+
+func _home_way(sx: float, row: int) -> Array:
+	## Від хати: крізь хвіртку на дорогу, повз фонтан на північ, до воріт подвір'я (точка 4) і далі до ферми.
+	var o = world.outer
+	var z: float = o.HUT_Z0 + o.HUT_STEP * row
+	var gx: float = o.HUT_X - o.YARD_GATE
+	return [Vector3(sx * gx, 0, z), Vector3(sx * 7.0, 0, z), Vector3(sx * 7.0, 0, 47.0), Vector3(sx * 1.5, 0, 40.0),
+		Vector3(0, 0, 12)] + FARM_WAY
+
+
+# ------------------------------------------------------------------ копиця сіна на фермі (конюх привозить, Тарасик годує)
+const FARM_HAY := Vector3(-179.0, 0, 31.0)
+var farm_hay: Node3D
+var _hay_k := 0.8
+
+
+func _make_farm_hay() -> void:
+	farm_hay = Node3D.new()
+	farm_hay.name = "FarmHay"
+	world.yard_root.add_child(farm_hay)
+	farm_hay.position = FARM_HAY
+	var m := Models.spawn(farm_hay, "haystack", 1.7)
+	if m == null:
+		farm_hay.add_child(Util.sphere(1.0, Util.mat(Color(0.86, 0.74, 0.38), 0.95), Vector3(0, 0.6, 0), Vector3(1.2, 0.9, 1.2)))
+	add_farm_hay(0.0)
+
+
+func add_farm_hay(d: float) -> void:
+	## Скільки сіна в копиці на фермі (0.35…1.0) — видно за розміром.
+	_hay_k = clampf(_hay_k + d, 0.35, 1.0)
+	if farm_hay:
+		farm_hay.scale = Vector3(1.0, _hay_k, 1.0) * (0.7 + 0.3 * _hay_k)
 
 
 func _spawn_forest_hares() -> void:

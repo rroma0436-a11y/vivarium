@@ -300,7 +300,7 @@ func _close_dialog() -> void:
 
 
 func dialog_open() -> bool:
-	for m in [beep_menu, grandpa_menu, kid_menu, girl_menu, tractor_menu, granny_menu, hitch_menu, choice_menu]:
+	for m in [beep_menu, grandpa_menu, kid_menu, girl_menu, tractor_menu, granny_menu, hitch_menu, choice_menu, shepherd_menu, groom_menu, gv_menu]:
 		if m != null and is_instance_valid(m) and m.visible:
 			return true
 	return dialog.visible
@@ -328,7 +328,10 @@ const BEEP_ITEMS := [
 func _build_beep_menu() -> void:
 	beep_menu = _make_menu("Beep, допоможи!", BEEP_ITEMS, Color(0.3, 0.72, 0.7), _menu_items)
 	grandpa_menu = _make_menu("Дідусю, а що ти робитимеш?", GRANDPA_ITEMS, Color(0.75, 0.5, 0.32), _gp_items)
-	kid_menu = _make_menu("Тарасику, чим займемось?", KID_ITEMS, Color(0.25, 0.55, 0.85), _kid_items)
+	kid_menu = _make_menu("Тарасику, що робитимеш на фермі?", KID_ITEMS, Color(0.25, 0.55, 0.85), _kid_items)
+	shepherd_menu = _make_menu("Пастуше Іване, що робитимемо?", SHEPHERD_ITEMS, Color(0.45, 0.6, 0.3), _worker_items)
+	groom_menu = _make_menu("Конюше Семене, що робитимемо?", GROOM_ITEMS, Color(0.6, 0.42, 0.25), _worker_items)
+	gv_menu = _make_menu("Гвинтику, що робитимеш з технікою?", GV_ITEMS, Color(0.4, 0.5, 0.6), _worker_items)
 	girl_menu = _make_menu("Ніка", GIRL_ITEMS, Color(0.85, 0.3, 0.4), _girl_items, 2)
 	tractor_menu = _make_menu("Трактор Червоненький", TRACTOR_ITEMS, Color(0.8, 0.28, 0.2), _tr_items)
 	hitch_menu = _make_menu("Причепи трактора", HITCH_ITEMS, Color(0.3, 0.45, 0.7), _th_items)
@@ -433,11 +436,38 @@ func show_grandpa_menu(at_home: bool, busy_outside: bool) -> void:
 var kid_menu: Control
 var _kid_items := {}
 const KID_ITEMS := [
-	["kid_water", "Принести води", Color(0.3, 0.62, 0.8)],
-	["kid_play", "Погратися з Бімом", Color(0.9, 0.5, 0.3)],
-	["kid_field", "Подивитися на соняшники", Color(0.9, 0.7, 0.2)],
+	["kid_feed", "Нагодувати корів і коней", Color(0.85, 0.65, 0.25)],
+	["kid_clean", "Прибрати в корівниках і стайнях", Color(0.55, 0.45, 0.3)],
+	["kid_water", "Принести води Бімові й курям", Color(0.3, 0.62, 0.8)],
 	["kid_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
 ]
+
+var shepherd_menu: Control
+var groom_menu: Control
+var gv_menu: Control
+var _worker_items := {}
+const SHEPHERD_ITEMS := [
+	["sh_out", "Вигнати худобу на пасовисько (задні ворота)", Color(0.4, 0.62, 0.3)],
+	["sh_in", "Загнати худобу в корівник", Color(0.6, 0.45, 0.3)],
+	["sh_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
+]
+const GROOM_ITEMS := [
+	["gm_out", "Випустити коней пастися", Color(0.4, 0.62, 0.3)],
+	["gm_hay", "Запрягти коня й поїхати по сіно до копиці", Color(0.85, 0.65, 0.25)],
+	["gm_in", "Загнати коней у стайні", Color(0.6, 0.42, 0.25)],
+	["gm_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
+]
+const GV_ITEMS := [
+	["gv_repair", "Оглянути й полагодити техніку", Color(0.45, 0.5, 0.6)],
+	["gv_test", "Випробувати техніку після ремонту", Color(0.8, 0.3, 0.22)],
+	["gv_eggs", "Зібрати яйця для дідуся", Color(0.72, 0.52, 0.28)],
+	["gv_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
+]
+
+
+func show_worker_menu(who: String) -> void:
+	## Меню працівників ферми: пастух, конюх, Гвинтик.
+	_open_menu({"shepherd": shepherd_menu, "groom": groom_menu, "gvintyk": gv_menu}[who])
 
 var girl_menu: Control
 var _girl_items := {}
@@ -515,8 +545,8 @@ func _open_menu(m: Control) -> void:
 
 
 func show_kid_menu(busy: bool) -> void:
-	## Меню Тарасика: води принести, погратися з Бімом, подивитися на соняшники.
-	for k in ["kid_water", "kid_play", "kid_field"]:
+	## Меню Тарасика: нагодувати худобу, прибрати, принести води.
+	for k in ["kid_feed", "kid_clean", "kid_water"]:
 		_kid_items[k].visible = not busy
 	_open_menu(kid_menu)
 

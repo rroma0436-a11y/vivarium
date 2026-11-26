@@ -1,6 +1,10 @@
-extends "res://scripts/npc.gd"
-## Тарасик, сусідський хлопчик. Носить воду з криниці відром — наливає Бімові в мисочку
-## й курям у корито; грається з Бімом у доганялки; ходить дивитися на соняшники.
+extends "res://scripts/farmhand.gd"
+## Тарасик, сусідський хлопчик: живе в хаті села, зранку йде на ферму працювати — у корівниках і стайнях
+## дає їсти всім (сіно з копиці на фермі) і прибирає за ними; увечері — додому.
+## Як попросять — іде на подвір'я, носить воду з криниці: Бімові в мисочку й курям у корито.
+
+const COW_DOORS := [Vector3(-166.9, 0, 39.0), Vector3(-166.9, 0, 55.0), Vector3(-166.9, 0, 71.0)]
+const STABLE_DOORS := [Vector3(-187.0, 0, 39.7), Vector3(-187.0, 0, 55.7), Vector3(-187.0, 0, 71.7)]
 
 var bucket: Node3D
 var bucket_water: MeshInstance3D
@@ -32,6 +36,126 @@ func make_bucket() -> void:
 	Walker.remember_home(bucket)
 
 
+func _barns() -> Array:
+	## [двері, звідки підходити (зовні), «корівник»/«стайня»]
+	var list: Array = []
+	for d in COW_DOORS:
+		list.append([d, d + Vector3(-1.3, 0, 0), true])
+	for d in STABLE_DOORS:
+		list.append([d, d + Vector3(1.3, 0, 0), false])
+	return list
+
+
+func _bundle() -> MeshInstance3D:
+	return Util.sphere(0.22, Util.mat(Color(0.86, 0.74, 0.38), 0.95), Vector3.ZERO, Vector3(1.3, 0.8, 1.0))
+
+
+func _fork() -> Node3D:
+	## Вила-гнойовики: держак і зубці.
+	var f := Node3D.new()
+	var wood := Util.mat(Color(0.6, 0.44, 0.26), 0.9)
+	var iron := Util.mat(Color(0.45, 0.45, 0.48), 0.4, 0.6)
+	f.add_child(Util.cyl(0.018, 0.018, 1.1, wood, Vector3(0, 0, 0)))
+	f.add_child(Util.box(Vector3(0.2, 0.03, 0.03), iron, Vector3(0, -0.55, 0)))
+	for k in 4:
+		f.add_child(Util.cyl(0.008, 0.004, 0.2, iron, Vector3(-0.09 + k * 0.06, -0.66, 0)))
+	return f
+
+
+func work_step() -> void:
+	## На фермі: по черзі годує худобу й коней і прибирає в корівниках та стайнях.
+	if randf() < 0.55:
+		await feed_job()
+	else:
+		await clean_job()
+
+
+func feed_job(all := false) -> void:
+	var id := begin_job("feed")
+	await back_farm()
+	var list := _barns()
+	if not all:
+		list = [list[randi() % list.size()]]
+	else:
+		say("Зараз нагодую всіх!", 2.0)
+	for b in list:
+		var fh: Node3D = main.farm_hay
+		if fh:
+			await _goto(fh.global_position + (b[1] - fh.global_position).normalized() * 1.5, 1.0)
+			if id != job:
+				return
+			face(fh.global_position)
+			await act("pick", minf(anim_length("pick"), 2.0))
+			main.add_farm_hay(-0.04)
+		hold(_bundle(), Vector3(0, 0.15, 0.0))
+		await _goto(b[1], 0.8)
+		if id != job:
+			var l := drop()
+			if l:
+				l.queue_free()
+			return
+		face(b[0])
+		await act("crouch_pick", minf(anim_length("crouch_pick"), 1.8))
+		var l2 := drop()
+		if l2:
+			l2.queue_free()
+		_sound("pop")
+		say(("Їжте, корівки, сінце!" if b[2] else "Сінце й овес для коників!"), 2.0)
+		await wait(0.8)
+	Game.emit_event("barn_fed")
+	end_job(id)
+
+
+func clean_job(all := false) -> void:
+	var id := begin_job("clean")
+	await back_farm()
+	var list := _barns()
+	if not all:
+		list = [list[randi() % list.size()]]
+	else:
+		say("Приберу в корівниках і стайнях!", 2.0)
+	var f := _fork()
+	hold(f, Vector3(0, 0.05, 0.0))
+	for b in list:
+		await _goto(b[1], 0.8)
+		if id != job:
+			break
+		face(b[0])
+		for k in 3:
+			await act("crouch_pick", minf(anim_length("crouch_pick"), 1.4))
+			_sound("chop")
+		say("Чистенько!" if b[2] else "Свіжа підстилка коникам!", 2.0)
+		await wait(0.6)
+	var l := drop()
+	if l:
+		l.queue_free()
+	if id == job:
+		Game.emit_event("barn_cleaned")
+		end_job(id)
+
+
+func command(what: String) -> void:
+	## Із меню Тарасика.
+	if not on_duty:
+		say("Іду на ферму!", 2.0)
+		return
+	cancel_job()
+	if held == bucket:
+		put_back_held()
+		bucket_water.visible = false
+	else:
+		var l := drop()
+		if l:
+			l.queue_free()
+	match what:
+		"feed":
+			await feed_job(true)
+		"clean":
+			await clean_job(true)
+		"water":
+			await water_job()
+
+
 func choose_job() -> bool:
 	var s := Game.state
 	var h := Game.hour()
@@ -55,6 +179,9 @@ func water_job() -> void:
 	var id := begin_job("water")
 	_water_day = int(Game.state["day"])
 	say("Піду наберу води!", 2.5)
+	await go_yard()
+	if id != job:
+		return
 	var sp: Dictionary = main.world.spots
 	for target in ["water_bowl", "trough"]:
 		await go(bucket.global_position + Vector3(0.0, 0, 0.45))
@@ -100,6 +227,7 @@ func water_job() -> void:
 			return
 		put_back_held()
 	bucket_water.visible = false
+	await back_farm()
 	end_job(id)
 
 

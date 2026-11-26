@@ -1,6 +1,9 @@
-extends "res://scripts/npc.gd"
-## Гвинтик — маленький робот-помічник. Збирає яйця в курнику й несе кошик дідусеві на ґанок,
-## носить дрова до хати, а коли все зроблено — танцює.
+extends "res://scripts/farmhand.gd"
+## Гвинтик — маленький робот-помічник. Живе в хаті села, зранку йде на ферму й працює біля техніки
+## під навісом: оглядає, доглядає й ремонтує трактор і комбайн, а після ремонту випробовує.
+## Як попросять — іде на подвір'я збирати яйця й несе кошик дідусеві на ґанок.
+
+var _fixed := {}                         # що полагоджено сьогодні й ще не випробувано: "tractor"/"combine" → true
 
 var basket: Node3D
 var porch_basket: Node3D
@@ -54,6 +57,185 @@ func _basket(with_eggs: bool) -> Node3D:
 	return n
 
 
+func _machines() -> Array:
+	## [назва, вузол, де стати (збоку), що каже]
+	var list: Array = []
+	var tr = main.tractor
+	if tr and is_instance_valid(tr):
+		list.append(["tractor", tr, tr.global_position + tr.global_transform.basis.x * 1.6, "трактор"])
+	var cb = main.combine
+	if cb and is_instance_valid(cb):
+		list.append(["combine", cb, cb.global_position + cb.global_transform.basis.x * 2.4, "комбайн"])
+	return list
+
+
+func _sparks(at: Vector3, secs: float) -> void:
+	var fx := CPUParticles3D.new()
+	fx.amount = 24
+	fx.lifetime = 0.35
+	fx.direction = Vector3(0, 1, 0)
+	fx.spread = 70.0
+	fx.initial_velocity_min = 1.0
+	fx.initial_velocity_max = 2.2
+	fx.gravity = Vector3(0, -6, 0)
+	var sm := SphereMesh.new()
+	sm.radius = 0.012
+	sm.height = 0.024
+	sm.radial_segments = 4
+	sm.rings = 2
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(1.0, 0.75, 0.3)
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.emission_enabled = true
+	m.emission = Color(1.0, 0.6, 0.2)
+	sm.material = m
+	fx.mesh = sm
+	main.world.yard_root.add_child(fx)
+	fx.global_position = at
+	await wait(secs)
+	fx.emitting = false
+	await wait(0.5)
+	fx.queue_free()
+
+
+func _cap(t: String) -> String:
+	return t.substr(0, 1).to_upper() + t.substr(1)
+
+
+func _wrench() -> MeshInstance3D:
+	return Util.box(Vector3(0.04, 0.22, 0.02), Util.mat(Color(0.6, 0.62, 0.66), 0.35, 0.7))
+
+
+func work_step() -> void:
+	## Біля техніки: що полагодив — випробовує, інакше оглядає й ремонтує.
+	var list := _machines()
+	if list.is_empty():
+		await dance()
+		return
+	for m in list:
+		if _fixed.get(m[0], false):
+			await test_job(m[0])
+			return
+	if randf() < 0.75:
+		await repair_job(list[randi() % list.size()][0])
+	else:
+		await dance()
+
+
+func _busy_machine(n) -> bool:
+	var st = n.get("state")
+	return (st != null and st != "parked") or n.get("driver") != null or (main._ctl_veh == n)
+
+
+func repair_job(which := "") -> void:
+	var id := begin_job("repair")
+	await back_farm()
+	var list := _machines()
+	var m: Array = []
+	for x in list:
+		if which == "" or x[0] == which:
+			m = x
+			break
+	if m.is_empty():
+		say("Біп… Техніки немає.", 2.0)
+		end_job(id)
+		return
+	if _busy_machine(m[1]):
+		say("Біп! %s зараз працює — огляну пізніше." % _cap(m[3]), 2.5)
+		end_job(id)
+		return
+	say("Біп! Огляну %s." % m[3], 2.0)
+	await _goto(m[2], 0.8)
+	if id != job:
+		return
+	face(m[1].global_position)
+	await act("crouch_pick", minf(anim_length("crouch_pick"), 2.0))
+	if id != job:
+		return
+	say("Ага… треба підкрутити гайки!", 2.5)
+	hold(_wrench(), Vector3(0, 0.05, 0.0))
+	for k in 3:
+		_sparks(global_position + Vector3(sin(rotation.y), 0, cos(rotation.y)) * 0.5 + Vector3(0, 0.5, 0), 1.2)
+		_sound("metal_drop")
+		await act("crouch_pick", minf(anim_length("crouch_pick"), 1.6))
+		if id != job:
+			var l0 := drop()
+			if l0:
+				l0.queue_free()
+			return
+	var l := drop()
+	if l:
+		l.queue_free()
+	_fixed[m[0]] = true
+	say("Полагоджено! Тепер випробую. Біп!", 2.5)
+	end_job(id)
+
+
+func test_job(which := "") -> void:
+	## Випробування після ремонту: трактор заводить і ганяє мотор, комбайн — оглядає на ходу дверцят.
+	var id := begin_job("test")
+	await back_farm()
+	var m: Array = []
+	for x in _machines():
+		if (which == "" and _fixed.get(x[0], false)) or x[0] == which:
+			m = x
+			break
+	if m.is_empty():
+		for x in _machines():
+			m = x
+			break
+	if m.is_empty() or _busy_machine(m[1]):
+		say("Біп… Зараз не можна випробувати.", 2.0)
+		end_job(id)
+		return
+	await _goto(m[2], 0.8)
+	if id != job:
+		return
+	face(m[1].global_position)
+	if m[0] == "tractor":
+		say("Заводжу! Три… два… один…", 2.0)
+		await wait(1.5)
+		m[1].start_engine()
+		await wait(6.0)
+		if m[1].get("driver") == null and main._ctl_veh != m[1]:
+			m[1].state = "parked"
+			m[1].say("Пух-пух…", 1.2)
+	else:
+		say("Перевіряю дверцята й мотовило…", 2.5)
+		if m[1].has_method("open_door"):
+			m[1].open_door(true)
+			await wait(2.0)
+			m[1].open_door(false)
+		await wait(2.0)
+	_fixed.erase(m[0])
+	if id == job:
+		say("Випробування пройдено! %s як новий! Біп-біп!" % _cap(m[3]), 3.0)
+		_sound("coin")
+		end_job(id)
+
+
+func command(what: String) -> void:
+	## Із меню Гвинтика.
+	if not on_duty:
+		say("Біп! Іду на ферму!", 2.0)
+		return
+	cancel_job()
+	if held == basket:
+		basket.get_node("eggs").visible = false
+		put_back_held()
+	else:
+		var l := drop()
+		if l:
+			l.queue_free()
+	match what:
+		"repair":
+			await repair_job()
+		"test":
+			await test_job()
+		"eggs":
+			await eggs_job()
+
+
 func choose_job() -> bool:
 	var h := Game.hour()
 	var d := int(Game.state["day"])
@@ -76,6 +258,9 @@ func eggs_job() -> void:
 	_eggs_day = int(Game.state["day"])
 	var sp: Dictionary = main.world.spots
 	say("Біп! Іду по яйця!", 2.5)
+	await go_yard()
+	if id != job:
+		return
 	await go(basket.global_position + Vector3(0, 0, 0.4))
 	if id != job:
 		return
@@ -103,6 +288,7 @@ func eggs_job() -> void:
 	Game.emit_event("eggs_collected")
 	say("Кошик яєць для дідуся! Біп!", 3.0)
 	_sound("coin")
+	await back_farm()
 	end_job(id)
 
 

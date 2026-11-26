@@ -129,8 +129,8 @@ func _process(delta: float) -> void:
 		if not night and not kept_in and (not keeper_only or Game.hour() >= 10.0):
 			mode = "free"
 			visible = true
-			position = door
-			_target = door + Vector3(randf_range(-2, 2), 0, 2.5)
+			position = _out_door()
+			_target = position + (Vector3(2.5, 0, randf_range(-2, 2)) if back_door != Vector3.ZERO else Vector3(randf_range(-2, 2), 0, 2.5))
 			say("Му-у! Доброго ранку!", 2.5)
 		return
 	if night and (mode == "free" or mode == "to_pasture"):
@@ -206,11 +206,20 @@ func send_home(fast := false) -> void:
 	_graze = 0.0
 	_busy = 0.0
 	speed_k = 2.0 if fast else 1.0
+	if back_door != Vector3.ZERO:
+		_path = [back_door + Vector3(-3.0, 0, 0)]
+		_target = back_door
+		return
 	_path = [door + door_in]
 	_target = door
 
 
 var door_in := Vector3.ZERO             # куди «заходить» за двері (напрям усередину)
+var back_door := Vector3.ZERO           # задні ворота корівника (до пасовиська); ZERO — лише передні двері
+
+
+func _out_door() -> Vector3:
+	return back_door if back_door != Vector3.ZERO else door
 
 
 # ------------------------------------------------------------------ запряжений у віз (cart.gd)
@@ -353,7 +362,7 @@ func send_out(fast := false) -> void:
 	kept_in = false
 	if mode == "inside":
 		visible = true
-		position = door
+		position = _out_door()
 	mode = "to_pasture"
 	speed_k = 2.0 if fast else 1.0
 	_target = Vector3(randf_range(pasture.position.x, pasture.end.x), 0, randf_range(pasture.position.y, pasture.end.y))

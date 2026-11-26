@@ -14,6 +14,7 @@ const PIER_W := 1.8                            # ширина настилу п�
 const PIER_DECK := 0.38                        # настил причалу над землею (вода — на 0.05)
 const WHEAT := Rect2(26, 14, 44, 30)          # x, z, ширина, глибина
 const WHEAT_N := Rect2(-48, -106, 36, 36)     # пшеничне поле на місці старого грибного лісу: x, z, ширина, глибина
+const HAY_N := Vector3(-19.0, 0, -67.0)        # копиця сіна біля пшеничного поля (конюх возить звідси сіно на ферму)
 const MILL_HILL := Vector3(-82, 0, -50)
 const MILL_HILL_R := 30.0
 const MILL_HILL_H := 4.0
@@ -1393,6 +1394,11 @@ func _make_wheat(rng: RandomNumberGenerator) -> void:
 func _make_wheat_field() -> void:
 	var rng := RandomNumberGenerator.new()         # окремий генератор — решта світу не зсувається
 	rng.seed = 4242
+	var hay := Models.spawn(self, "haystack", 1.9)
+	if hay:
+		hay.position = HAY_N
+		hay.rotation.y = 0.7
+		_obst.append([HAY_N.x, HAY_N.z, 1.3, 1.9])
 	if Models.exists("wheat"):
 		_make_wheat_clumps(rng)
 		return
