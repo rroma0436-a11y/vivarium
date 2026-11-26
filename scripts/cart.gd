@@ -177,25 +177,28 @@ func seat_global() -> Vector3:
 	return to_global(SEAT)
 
 
-func plow_hitch() -> Vector3:
-	## Гак позаду воза — сюди чіпляють плуг (plow.gd).
-	return to_global(Vector3(0, 0, -LENGTH * 0.5 - 0.05))
+func drop_shafts() -> void:
+	## Кінь виходить з оглобель (віз лишається, де стоїть; упряж — на коні).
+	hitched = false
+	speed = 0.0
+	if front:
+		front.rotation.y = 0.0
 
 
 func plow_field(f: Rect2, alive: Callable) -> void:
-	## Оранка конем: ряди вздовж z; плуг позаду воза сам заглиблюється в полі, на краях — розворот.
+	## Оранка конем (плуг на посторонках, plow.gd): кінь уже стоїть на першому ряду носом на північ;
+	## ряди вздовж z, кінь виходить за край, поки плуг дооре ряд, — і розворот на наступний.
 	var step := 1.8
 	var x := f.position.x + 1.0
 	var x1 := f.end.x - 0.8
-	var zs := f.end.y + 3.2                  # кінь виходить за край, поки плуг дооре ряд
+	var zs := f.end.y + 3.2
 	var zn := f.position.y - 3.2
 	var north := true
-	await _horse_to(Vector3(x, 0, zs), 1.6, 0.8, false)
 	while horse and alive.call():
-		await _horse_to(Vector3(x, 0, zn if north else zs), 1.5, 0.5, false)
+		await _horse_to(Vector3(x, 0, zn if north else zs), 1.2, 0.5, false)
 		if x + step > x1 or not alive.call():
 			break
-		await _horse_to(Vector3(x + step * 0.5, 0, (zn - 2.0) if north else (zs + 2.0)), 1.1, 0.6, false)
+		await _horse_to(Vector3(x + step * 0.5, 0, (zn - 1.8) if north else (zs + 1.8)), 0.9, 0.6, false)
 		x += step
 		north = not north
 	speed = 0.0

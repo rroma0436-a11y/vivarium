@@ -7,6 +7,7 @@ var pasture := PASTURE
 var voices := ["Му-у-у!", "Мууу! Привіт!", "Му! Трава смачна!"]
 var kind := "bull"
 var night_from := 20.0
+var stay_out := false                   # ночує надворі (кінь біля садка — стайні там нема)
 var speed_k := 1.0
 var _inside_p := Vector3.ZERO           # де стоїть у сараї (невидимий)
 var door := Vector3(7.0, 0, -21.5)
@@ -122,7 +123,7 @@ func _process(delta: float) -> void:
 		_milk_step(delta)                  # бабуся доїть: стоїть на місці, ремигає
 		return
 	var h := Game.hour()
-	var night := h >= night_from or h < 6.3
+	var night := (h >= night_from or h < 6.3) and not stay_out
 	if mode == "inside":
 		if night:
 			kept_in = false

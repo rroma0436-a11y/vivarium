@@ -701,7 +701,7 @@ func _tap_object(kind: String) -> void:
 		"cart":
 			hud.toast("Щоб поїхати на возі, торкнись дідуся → «Запрягти коня з возом»", 4.0)
 		"garden_cart":
-			hud.toast("Віз із конем біля садка. Торкнись дідуся → «Поїхати возом від садка», «Причепити чи зняти плуг» або «Зорати поле конем»", 5.0)
+			hud.toast("Віз із конем біля садка. Торкнись дідуся → «Поїхати возом від садка», «Покласти чи зняти плуг з воза» або «Зорати поле конем»", 5.0)
 		"gold_flower":
 			audio.play("magic_bells", -6.0)
 			hud.toast("Чарівний соняшник із золотих насінинок", 3.0)
@@ -1260,6 +1260,7 @@ var extra_horses: Array = []                          # коні для масо
 # віз із конем у упряжі біля дідового садка (східніше тину садка, оглоблями на північ) і кінний плуг поруч
 const GARDEN_CART_PARK := Vector3(23.3, 0, 15.5)
 const GARDEN_PLOW_AT := Vector3(21.5, 0, 16.0)
+const GARDEN_PADDOCK := Rect2(22.6, 19.0, 2.4, 3.6)      # де пасеться розпряжений кінь
 var garden_horse
 var garden_cart
 var garden_plow
@@ -1271,17 +1272,13 @@ func _spawn_garden_cart(field: Rect2) -> void:
 	garden_cart = preload("res://scripts/cart.gd").new()
 	world.yard_root.add_child(garden_cart)
 	garden_cart.setup(GARDEN_CART_PARK, PI)
+	# розпряжений кінь пасеться біля воза (на південь від нього), упряж лежить на возі
 	garden_horse = preload("res://scripts/bull.gd").new()
 	world.yard_root.add_child(garden_horse)
-	var hp: Vector3 = garden_cart.hitch_pos()
-	garden_horse.setup(hp, hp, "horse", 1.75, Rect2(hp.x - 1.0, hp.z - 1.0, 2.0, 2.0))
+	var pc := Vector3(GARDEN_PADDOCK.get_center().x, 0, GARDEN_PADDOCK.get_center().y)
+	garden_horse.setup(pc, pc, "horse", 1.75, GARDEN_PADDOCK)
 	garden_horse.voices = ["І-го-го!", "Пфррр! Поїдемо орати?"]
-	garden_horse.hitch_begin()
-	garden_horse.global_position = hp
-	garden_horse.rotation.y = garden_cart.park_yaw
-	garden_cart.horse = garden_horse
-	garden_cart.hitched = true
-	garden_cart.harness_now()
+	garden_horse.stay_out = true
 	if garden_horse.area:
 		garden_horse.area.set_meta("kind", "garden_cart")
 	if garden_cart.area:
@@ -1769,7 +1766,7 @@ func vehicle_control_start(kind: String, veh: Node3D) -> void:
 		hud.flight.land_text = "Причепи"
 		hud.toast("Джойстик — їхати й повертати, ▲ / ▼ — підняти чи опустити плуг (або кузов причепа). «Причепи» — причепити чи відчепити плуг і причіп. «Готово» — поставити трактор додому", 7.0)
 	elif kind == "garden_cart":
-		hud.toast("Джойстик — вести коня з возом. Причеплений плуг у полі оре сам. «Готово» — віз повернеться під садок", 5.0)
+		hud.toast("Джойстик — вести коня з возом. «Готово» — віз повернеться під садок, дідусь розпряже коня", 5.0)
 	else:
 		hud.toast("Джойстик — вести коня з возом. «Готово» — повернути коня в стайню", 5.0)
 

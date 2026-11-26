@@ -71,6 +71,13 @@ func _jug(key: String) -> Node3D:
 
 
 func _process(delta: float) -> void:
+	if behind_plow:
+		_behind_step(delta)
+		if _bubble_left > 0.0:
+			_bubble_left -= delta
+			if _bubble_left <= 0.0:
+				bubble.visible = false
+		return
 	if on_tractor or _climbing:
 		if on_tractor and not _climbing:
 			_ride_step()
@@ -1407,11 +1414,16 @@ func horse_job() -> void:
 
 # ------------------------------------------------------------------ віз біля садка (main.gd: garden_cart) і кінний плуг
 const GARDEN_WALK := [Vector3(1.5, 0, 6.2), Vector3(10.5, 0, 6.0), Vector3(21.0, 0, 6.3), Vector3(25.0, 0, 8.0)]
-const GARDEN_BACK := Vector3(25.0, 0, 19.5)              # за возом (звідти підходить до плуга)
-# від воза на дорогу й до поля під оранку
-const GARDEN_TO_FIELD := [Vector3(23.3, 0, 8.0), Vector3(26.0, 0, 5.6), Vector3(71.0, 0, 5.0), Vector3(73.4, 0, 7.0)]
+# від воза на дорогу й до поля під оранку: віз стає біля поля, на південь від дороги
+const GARDEN_TO_FIELD := [Vector3(23.3, 0, 8.0), Vector3(26.0, 0, 5.6), Vector3(66.0, 0, 6.2), Vector3(73.0, 0, 6.6)]
 # заїзд на стоянку: уздовж садка на південь, розворот — і з півдня оглоблями на північ
 const GARDEN_LOOP := [Vector3(24.8, 0, 7.5), Vector3(25.0, 0, 21.0), Vector3(24.0, 0, 25.5), Vector3(22.0, 0, 24.5), Vector3(23.3, 0, 22.6)]
+const GARDEN_PADDOCK := Vector3(23.7, 0, 20.8)           # де пасеться розпряжений кінь (main.gd)
+const LEAD_AT := Vector3(0.75, 0, 0.8)                   # де йде дідусь, ведучи коня за вуздечку (зліва від голови)
+const BRIDLE := Vector3(0.16, 1.3, 0.95)                 # вуздечка біля морди (у системі коня)
+var behind_plow: Node3D = null                           # дідусь іде позаду плуга, тримаючись за чепіги
+var _bp_v := 0.0
+var _cart_hs := 0.95                                     # висота стегон стоячи (для злізання з воза)
 
 
 func _garden_way_home(cart: Node3D) -> Array:
@@ -1445,52 +1457,390 @@ func _walk_from_garden(id: int) -> bool:
 	return true
 
 
-func _plow_move(id: int, cart: Node3D, plow: Node3D, attach: bool) -> void:
-	## Підходить до чепіг плуга, береться — і чіпляє плуг позаду воза (або знімає й ставить на місце).
-	await go(GARDEN_BACK)
-	if id != job:
+func cancel_job() -> void:
+	if behind_plow:
+		_garden_abort()
+	super()
+
+
+func _garden_abort() -> void:
+	behind_plow = null
+	_climbing = false
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+
+
+# ---------------- дідусь позаду плуга: руки на чепігах, іде слідом
+func _behind_step(delta: float) -> void:
+	var p: Node3D = behind_plow
+	if not is_instance_valid(p):
+		behind_plow = null
 		return
-	await go(plow.to_global(Vector3(0, 0, -1.9)))
-	if id != job:
-		return
-	_face_to = atan2(plow.global_position.x - global_position.x, plow.global_position.z - global_position.z)
-	play("wave", 1.0)
-	await wait(0.6)
-	if id != job:
-		return
-	if attach:
-		await plow.attach(cart)
+	var at: Vector3 = p.rear_stand()
+	var mv := Vector2(at.x - global_position.x, at.z - global_position.z).length() / maxf(delta, 0.001)
+	_bp_v = lerpf(_bp_v, mv, 1.0 - exp(-delta * 6.0))
+	global_position = at
+	rotation.y = p.rotation.y
+	model.position = Vector3(0, _base_y, 0)
+	if _bp_v > 0.15:
+		play("walk", clampf(_bp_v / walk_speed, 0.3, 1.6))
 	else:
-		await plow.detach()
-	play("idle")
-	await go(GARDEN_BACK)
+		play("idle")
+	if pose:
+		pose.lean = 0.25
+		pose.ik = {"LeftHand": [p.grip(true), 1.0], "RightHand": [p.grip(false), 1.0]}
 
 
-func _ride_garden_cart(id: int, cart: Node3D) -> bool:
-	await go(cart.to_global(Vector3(-1.35, 0, 0.3)))
+func _take_plow(id: int, plow: Node3D) -> bool:
+	## Підходить ззаду до плуга й береться за чепіги.
+	await go(plow.rear_stand())
 	if id != job:
 		return false
-	await _mount(cart)
+	_face_to = plow.rotation.y
+	await wait(0.3)
+	stop()
+	_bp_v = 0.0
+	behind_plow = plow
+	await wait(0.4)
+	return id == job
+
+
+func _carry_plow(id: int, plow: Node3D, to: Transform3D) -> bool:
+	## Несе плуг за чепіги (плуг піднятий) і кладе його туди, куди треба (на віз чи на землю).
+	if not await _take_plow(id, plow):
+		_garden_abort()
+		return false
+	var d := plow.global_position.distance_to(to.origin)
+	await plow.glide(to, maxf(1.4, d / 0.8))
+	behind_plow = null
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	play("idle")
+	return id == job
+
+
+# ---------------- коня — за вуздечку
+func _lead_pose(h: Node3D, sp: float) -> void:
+	var at: Vector3 = h.to_global(LEAD_AT)
+	global_position = Vector3(at.x, 0, at.z)
+	rotation.y = h.rotation.y
+	model.position = Vector3(0, _base_y, 0)
+	if absf(sp) > 0.1:
+		play("walk", clampf(absf(sp) / walk_speed, 0.4, 1.4))
+	else:
+		play("idle")
+	if pose:
+		pose.lean = 0.0
+		pose.ik = {"RightHand": [h.to_global(BRIDLE), 0.8]}
+
+
+func _lead_horse(id: int, h: Node3D, way: Array) -> bool:
+	## Підходить до коня, бере за вуздечку й веде через точки way.
+	h.hitch_begin()
+	if h.to_local(global_position).x < 0.0:
+		await go(h.to_global(Vector3(0, 0, 2.6)))         # обходить коня спереду
+	await go(h.to_global(LEAD_AT))
 	if id != job:
-		_dismount(cart)
+		return false
+	stop()
+	_climbing = true
+	for wp in way:
+		var t := 0.0
+		while t < 40.0:
+			var dt := get_process_delta_time()
+			t += dt
+			var to: Vector3 = (wp as Vector3) - h.global_position
+			to.y = 0.0
+			var d := to.length()
+			if d < 0.3 or id != job:
+				break
+			var hd := lerp_angle(h.rotation.y, atan2(to.x, to.z), 1.0 - exp(-dt * 2.5))
+			var sp := minf(1.0, maxf(0.35, d * 1.2))
+			h.hitch_move(hd, sp, dt)
+			_lead_pose(h, sp)
+			await get_tree().process_frame
+		if id != job:
+			_garden_abort()
+			return false
+	h.hitch_move(h.rotation.y, 0.0, 0.0)
+	_lead_pose(h, 0.0)
+	return true
+
+
+func _turn_horse(h: Node3D, yaw: float) -> void:
+	while absf(angle_difference(h.rotation.y, yaw)) > 0.03:
+		var dt := get_process_delta_time()
+		var a: float = h.rotation.y + clampf(angle_difference(h.rotation.y, yaw), -1.2 * dt, 1.2 * dt)
+		h.hitch_move(a, 0.0, dt)
+		h._play("walk", 0.5)
+		_lead_pose(h, 0.3)
+		await get_tree().process_frame
+	h.hitch_move(yaw, 0.0, 0.0)
+
+
+func _back_horse(h: Node3D, p: Vector3) -> void:
+	## Кінь задкує (в оглоблі).
+	var t := 0.0
+	while t < 12.0:
+		var dt := get_process_delta_time()
+		t += dt
+		var to := p - h.global_position
+		to.y = 0.0
+		if to.length() < 0.05:
+			break
+		h.global_position += to.normalized() * minf(0.6 * dt, to.length())
+		h._play("walk", -0.6)
+		_lead_pose(h, 0.6)
+		await get_tree().process_frame
+	h.global_position = Vector3(p.x, h.global_position.y, p.z)
+	h.hitch_move(h.rotation.y, 0.0, 0.0)
+
+
+func _release_lead() -> void:
+	_climbing = false
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	play("idle")
+
+
+func _harness_horse(id: int, cart: Node3D, h: Node3D) -> bool:
+	## Веде коня до воза, заводить задки в оглоблі й запрягає.
+	if cart.hitched:
+		return true
+	var way := [cart.to_global(Vector3(-2.4, 0, -3.2)), cart.to_global(Vector3(-2.4, 0, cart.BEHIND + 2.8)), cart.to_global(Vector3(0, 0, cart.BEHIND + 2.8))]
+	if not await _lead_horse(id, h, way):
+		return false
+	await _turn_horse(h, cart.rotation.y)
+	await _back_horse(h, cart.to_global(Vector3(0, 0, cart.BEHIND)))
+	_release_lead()
+	if id != job:
+		return false
+	say("Тпру-у… Стій, запрягаю!", 2.0)
+	_face_to = atan2(h.global_position.x - global_position.x, h.global_position.z - global_position.z)
+	play("wave", 1.0)
+	await wait(1.2)
+	cart.horse = h
+	cart.harness_now()
+	cart.hitched = true
+	h.hitch_move(cart.rotation.y, 0.0, 0.0)
+	play("idle")
+	return id == job
+
+
+func _unharness_horse(id: int, cart: Node3D) -> bool:
+	## Розпрягає коня й відводить пастися біля садка.
+	var h: Node3D = cart.horse
+	if h == null:
+		return true
+	say("Розпрягаю, відпочивай, коню!", 2.0)
+	if h.to_local(global_position).x < 0.0:
+		await go(h.to_global(Vector3(0, 0, 2.6)))
+	await go(h.to_global(LEAD_AT))
+	if id != job:
+		return false
+	_face_to = h.rotation.y
+	play("wave", 1.0)
+	await wait(1.0)
+	cart.hitched = false
+	h.show_harness(false)
+	cart.harness_to_cart()
+	var way := [cart.to_global(Vector3(0, 0, cart.BEHIND + 2.2)), cart.to_global(Vector3(-2.4, 0, cart.BEHIND + 1.0)),
+		cart.to_global(Vector3(-2.4, 0, -3.2)), GARDEN_PADDOCK]
+	if not await _lead_horse(id, h, way):
+		return false
+	_release_lead()
+	cart.unhitch()
+	return id == job
+
+
+# ---------------- на віз і з воза — по-справжньому: нога на маточину колеса, руки на борт
+func _cart_hub(c: Node3D) -> Vector3:
+	for w in c.wheels:
+		if w[2]:
+			var p: Vector3 = c.to_local((w[0] as Node3D).global_position)
+			if p.x < 0.0:
+				return p
+	return Vector3(-0.7, 0.33, c._pz)
+
+
+func _cart_climb_on(c: Node3D) -> void:
+	_climbing = true
+	stop()
+	put_back_held()
+	if pose:
+		pose.sit = 0.0
+		pose.life = 0.0
+		pose.ik = {}
+	play("idle")
+	model.position = Vector3(0, _base_y, 0)
+	var hub := _cart_hub(c)
+	var C := Vector3(hub.x - 0.5, 0, hub.z - 0.1)
+	var yaw_in := PI / 2.0
+	var tw := 0.0
+	var from := global_position
+	var at: Vector3 = c.to_global(C)
+	at.y = 0.0
+	while tw < 0.4:
+		tw += get_process_delta_time()
+		global_position = from.lerp(at, minf(1.0, tw / 0.4))
+		rotation.y = lerp_angle(rotation.y, c.rotation.y + yaw_in, minf(1.0, tw / 0.35))
+		await get_tree().process_frame
+	await get_tree().process_frame
+	var H0: Vector3 = c.to_local(hips_world())
+	var hs := H0.y
+	_cart_hs = hs
+	var ank := 0.08
+	var bed := 0.55
+	var S: Vector3 = c.SEAT
+	var ra := Vector3(hub.x + 0.08, 0.8, hub.z - 0.45)
+	var rb := Vector3(hub.x + 0.08, 0.8, hub.z + 0.25)
+	var keys := [
+		{"t": 0.0, "hips": H0, "yaw": yaw_in, "lean": 0.0,
+			"ik": {"LeftFoot": [C + Vector3(0, ank, 0.12), 1.0], "RightFoot": [C + Vector3(0, ank, -0.12), 1.0]}},
+		{"t": 0.55, "hips": H0 + Vector3(0.06, -0.05, 0.0), "yaw": yaw_in, "lean": 0.25,
+			"ik": {"LeftFoot": [C + Vector3(0, ank, 0.12), 1.0], "RightFoot": [hub + Vector3(-0.08, ank * 0.5, -0.05), 1.0],
+				"LeftHand": [ra, 1.0], "RightHand": [rb, 1.0]}},
+		{"t": 1.25, "hips": Vector3(hub.x - 0.15, hub.y + hs - 0.08, hub.z - 0.05), "yaw": yaw_in, "lean": 0.3,
+			"ik": {"LeftFoot": [hub + Vector3(-0.2, 0.15, 0.2), 0.6], "RightFoot": [hub + Vector3(-0.08, ank * 0.5, -0.05), 1.0],
+				"LeftHand": [ra, 1.0], "RightHand": [rb, 1.0]}},
+		{"t": 1.95, "hips": Vector3(-0.28, bed + hs - 0.05, S.z - 0.15), "yaw": yaw_in * 0.6, "lean": 0.15,
+			"ik": {"LeftFoot": [Vector3(-0.3, bed + ank, S.z - 0.05), 1.0], "RightFoot": [hub + Vector3(0.0, 0.2, 0.0), 0.5],
+				"LeftHand": [ra, 0.6], "RightHand": [rb, 0.6]}},
+		{"t": 2.55, "hips": Vector3(0.0, bed + hs - 0.05, S.z - 0.2), "yaw": 0.0, "lean": 0.1,
+			"ik": {"LeftFoot": [Vector3(0.12, bed + ank, S.z - 0.1), 1.0], "RightFoot": [Vector3(-0.12, bed + ank, S.z - 0.1), 1.0]}},
+		{"t": 3.2, "hips": S, "yaw": 0.0, "lean": 0.15,
+			"ik": {"LeftFoot": [Vector3(0.15, bed + ank, S.z + 0.45), 1.0], "RightFoot": [Vector3(-0.15, bed + ank, S.z + 0.45), 1.0]}},
+	]
+	var sit_later := func():
+		await wait(2.5)
+		if _climbing:
+			_hold_pose("sitdrink", 0.6)
+	sit_later.call()
+	await _play_keys(c, keys)
+	pose.ik = {}
+	pose.lean = 0.0
+	seated = "tractor"
+	on_tractor = c
+	_climbing = false
+
+
+func _cart_climb_off(c: Node3D) -> void:
+	on_tractor = null
+	_climbing = true
+	await get_tree().process_frame
+	var hub := _cart_hub(c)
+	var C := Vector3(hub.x - 0.55, 0, hub.z - 0.1)
+	var hs := _cart_hs
+	var ank := 0.08
+	var bed := 0.55
+	var S: Vector3 = c.SEAT
+	var ra := Vector3(hub.x + 0.08, 0.8, hub.z - 0.45)
+	var rb := Vector3(hub.x + 0.08, 0.8, hub.z + 0.25)
+	var H0: Vector3 = c.to_local(hips_world())
+	var yaw_out := -PI / 2.0
+	var keys := [
+		{"t": 0.0, "hips": H0, "yaw": 0.0, "lean": 0.15,
+			"ik": {"LeftFoot": [Vector3(0.15, bed + ank, S.z + 0.45), 1.0], "RightFoot": [Vector3(-0.15, bed + ank, S.z + 0.45), 1.0]}},
+		{"t": 0.7, "hips": Vector3(0.0, bed + hs - 0.05, S.z - 0.2), "yaw": 0.0, "lean": 0.1,
+			"ik": {"LeftFoot": [Vector3(0.12, bed + ank, S.z - 0.1), 1.0], "RightFoot": [Vector3(-0.12, bed + ank, S.z - 0.1), 1.0]}},
+		{"t": 1.3, "hips": Vector3(-0.3, bed + hs - 0.05, S.z - 0.15), "yaw": yaw_out, "lean": 0.1,
+			"ik": {"LeftFoot": [Vector3(-0.3, bed + ank, S.z - 0.25), 1.0], "RightFoot": [Vector3(-0.3, bed + ank, S.z), 1.0],
+				"LeftHand": [rb, 0.6], "RightHand": [ra, 0.6]}},
+		{"t": 2.0, "hips": Vector3(hub.x - 0.12, hub.y + hs - 0.1, hub.z - 0.05), "yaw": yaw_out, "lean": 0.2,
+			"ik": {"LeftFoot": [hub + Vector3(-0.08, ank * 0.5, 0.05), 1.0], "RightFoot": [hub + Vector3(-0.25, 0.1, -0.2), 0.5],
+				"LeftHand": [rb, 1.0], "RightHand": [ra, 1.0]}},
+		{"t": 2.7, "hips": C + Vector3(0, hs, 0), "yaw": yaw_out, "lean": 0.0,
+			"ik": {"LeftFoot": [C + Vector3(0, ank, -0.12), 0.0], "RightFoot": [C + Vector3(0, ank, 0.12), 0.0],
+				"LeftHand": [rb, 0.0], "RightHand": [ra, 0.0]}},
+	]
+	play("idle")
+	await _play_keys(c, keys)
+	pose.ik = {}
+	pose.lean = 0.0
+	seated = ""
+	global_position.y = 0.0
+	model.position = Vector3(0, _base_y, 0)
+	ap.speed_scale = 1.0
+	play("idle")
+	_climbing = false
+
+
+# ---------------- справи з возом біля садка
+func _garden_parts() -> Array:
+	var m := _main()
+	return [m, m.garden_cart, m.garden_horse, m.garden_plow]
+
+
+func _ready_plow_and_horse(id: int, cart: Node3D, h: Node3D, plow: Node3D, load_plow: bool) -> bool:
+	## Біля садка: (за потреби) кладе плуг на віз, запрягає коня й сідає на віз.
+	if load_plow and plow and plow.state != "cart":
+		if plow.state == "horse":
+			plow.unhitch()
+		say("Покладу плуга на віз.", 2.0)
+		await go(Vector3(25.2, 0, 19.2))              # повз віз ззаду
+		if not await _carry_plow(id, plow, plow.bed_xf(cart)):
+			return false
+		plow.put_in_cart(cart)
+	if not cart.hitched:
+		if not await _harness_horse(id, cart, h):
+			return false
+	if not await _to_climb_spot(id, cart):
+		return false
+	await _cart_climb_on(cart)
+	if id != job:
+		await _cart_climb_off(cart)
 		return false
 	return true
 
 
+func _to_climb_spot(id: int, cart: Node3D) -> bool:
+	## До лівого переднього колеса воза (обходить коня спереду, якщо стоїть з іншого боку).
+	if cart.to_local(global_position).x > -0.3:
+		await go(cart.to_global(Vector3(0, 0, cart.BEHIND + 2.6)))
+		if id != job:
+			return false
+	await go(cart.to_global(_cart_hub(cart) + Vector3(-0.9, 0, -0.1)))
+	return id == job
+
+
+func _home_and_unload(id: int, cart: Node3D, plow: Node3D) -> void:
+	## Додому: віз — під садок, плуг — з воза на місце, коня — розпрягти.
+	say("Додому, коню!", 2.0)
+	await cart.drive_back(_garden_way_home(cart))
+	await _cart_climb_off(cart)
+	if id != job:
+		return
+	if plow and plow.state == "cart":
+		say("Зніму плуга.", 2.0)
+		await go(Vector3(25.2, 0, 19.2))
+		if not await _carry_plow(id, plow, plow.rest_xf()):
+			return
+		plow.put_down()
+		await go(Vector3(20.6, 0, 15.0))              # повз плуг — до коня
+	if not await _unharness_horse(id, cart):
+		return
+	await _walk_from_garden(id)
+
+
 func garden_cart_job() -> void:
-	## Дідусь сідає на віз біля садка — гравець кермує конем. «Готово» — кінь сам везе віз під садок.
-	var m := _main()
-	var cart = m.garden_cart
-	if cart == null or cart.horse == null:
+	## Дідусь запрягає коня, лізе на віз — гравець кермує. «Готово» — додому, розпрягти коня.
+	var parts := _garden_parts()
+	var m = parts[0]
+	var cart = parts[1]
+	var h = parts[2]
+	if cart == null or h == null:
 		say("Ех, коня чи воза в нас нема…", 2.5)
 		return
 	var id := begin_job("garden")
-	say("Піду до коня під садок!", 2.5)
+	say("Піду запрягати коня!", 2.5)
 	if not await _go_outside(id):
 		return
 	if not await _walk_to_garden(id):
 		return
-	if not await _ride_garden_cart(id, cart):
+	if not await _ready_plow_and_horse(id, cart, h, parts[3], false):
 		return
 	say("Ну, онучку, кермуй конем! Я — пасажиром.", 2.5)
 	cart.start_manual()
@@ -1498,72 +1848,129 @@ func garden_cart_job() -> void:
 	while id == job and m._ctl_veh == cart:
 		await get_tree().process_frame
 	m.vehicle_control_stop()
-	say("Гарна їзда! Ставимо віз під садок.", 2.5)
-	await cart.drive_back(_garden_way_home(cart))
-	await _dismount(cart)
-	if id != job:
-		return
-	await _walk_from_garden(id)
+	await _home_and_unload(id, cart, null)
 
 
 func garden_plow_job() -> void:
-	## Причепити плуг позаду воза або зняти й поставити біля садка.
-	var m := _main()
-	var cart = m.garden_cart
-	var plow = m.garden_plow
+	## Покласти плуг на віз або зняти з воза й поставити біля садка.
+	var parts := _garden_parts()
+	var cart = parts[1]
+	var plow = parts[3]
 	if cart == null or plow == null:
 		say("Ех, плуга в нас нема…", 2.5)
 		return
-	var attach: bool = plow.cart == null
+	var to_cart: bool = plow.state != "cart"
 	var id := begin_job("garden")
-	say("Причеплю плуга до воза!" if attach else "Зніму плуга з воза!", 2.5)
+	say("Покладу плуга на віз!" if to_cart else "Зніму плуга з воза!", 2.5)
 	if not await _go_outside(id):
 		return
 	if not await _walk_to_garden(id):
 		return
-	await _plow_move(id, cart, plow, attach)
-	if id != job:
+	if plow.state == "horse":
+		plow.unhitch()
+	await go(Vector3(25.2, 0, 19.2))
+	if not await _carry_plow(id, plow, plow.bed_xf(cart) if to_cart else plow.rest_xf()):
 		return
-	say("Готово — плуг причеплений!" if attach else "Хай плуг постоїть до весни.", 2.5)
+	if to_cart:
+		plow.put_in_cart(cart)
+	else:
+		plow.put_down()
+	say("Готово — плуг на возі!" if to_cart else "Хай плуг постоїть біля садка.", 2.5)
 	await _walk_from_garden(id)
 
 
 func garden_field_job() -> void:
-	## Чіпляє плуг (якщо ще ні), сідає на віз, їде на поле й оре конем рядами, потім — назад під садок.
-	var m := _main()
-	var cart = m.garden_cart
-	var plow = m.garden_plow
-	if cart == null or plow == null or cart.horse == null:
+	## Плуг — на віз, запрягти коня, на поле. Там: злізти, зняти плуг, відпрягти коня й підвести до плуга,
+	## зачепити, взятися ззаду за чепіги й орати. Потім: відчепити, плуг — на віз, запрягти, додому,
+	## плуг — на місце, коня — розпрягти.
+	var parts := _garden_parts()
+	var m = parts[0]
+	var cart = parts[1]
+	var h = parts[2]
+	var plow = parts[3]
+	if cart == null or plow == null or h == null:
 		say("Ех, коня чи плуга в нас нема…", 2.5)
 		return
+	var f: Rect2 = m.world.outer.PLOW_FIELD
 	var id := begin_job("garden")
 	say("Поїду орати поле конем!", 2.5)
 	if not await _go_outside(id):
 		return
 	if not await _walk_to_garden(id):
 		return
-	if plow.cart == null:
-		await _plow_move(id, cart, plow, true)
-		if id != job:
-			return
-	if not await _ride_garden_cart(id, cart):
+	if not await _ready_plow_and_horse(id, cart, h, plow, true):
 		return
 	say("Но-о, коню! Гайда на поле!", 2.5)
 	for wp in GARDEN_TO_FIELD:
-		await cart._horse_to(wp, 2.6, 1.5)
-		if id != job:
-			break
-	if id == job:
-		say("Оремо!", 1.5)
-		await cart.plow_field(m.world.outer.PLOW_FIELD, func(): return id == job)
-	if id == job:
-		say("Ото гарно зорали конем!", 2.5)
-		Game.emit_event("plowed")
-	await cart.drive_back(_garden_way_home(cart))
-	await _dismount(cart)
+		await cart._horse_to(wp, 2.6, 1.0)
+	cart.speed = 0.0
+	h.hitch_move(h.rotation.y, 0.0, 0.0)
+	await _cart_climb_off(cart)
 	if id != job:
 		return
-	await _walk_from_garden(id)
+	cart.drop_shafts()
+	# плуг — з воза на край поля
+	say("Знімаю плуга.", 2.0)
+	var start := Transform3D(Basis(Vector3.UP, PI), Vector3(f.position.x + 1.0, 0, f.end.y + 1.4))
+	if not await _carry_plow(id, plow, plow.side_xf(cart)):
+		return
+	if not await _carry_plow(id, plow, start):
+		return
+	plow.put_down()
+	# коня — з оглобель до плуга
+	say("Ходи, коню, до плуга.", 2.0)
+	var way := [h.to_global(Vector3(0, 0, 2.0)), plow.to_global(Vector3(-2.2, 0, plow.HALF + plow.TRACE - 0.6)),
+		plow.to_global(Vector3(0, 0, plow.HALF + plow.TRACE))]
+	if not await _lead_horse(id, h, way):
+		return
+	await _turn_horse(h, plow.rotation.y)
+	_release_lead()
+	if id != job:
+		return
+	await go(plow.to_global(Vector3(-0.6, 0, plow.HALF + 0.4)))
+	if id != job:
+		return
+	_face_to = atan2(plow.global_position.x - global_position.x, plow.global_position.z - global_position.z)
+	play("wave", 1.0)
+	await wait(1.0)
+	plow.hitch_horse(h)
+	# оранка: дідусь іде позаду, тримається за чепіги
+	if not await _take_plow(id, plow):
+		_garden_abort()
+		return
+	say("Оремо!", 1.5)
+	await cart.plow_field(f, func(): return id == job)
+	if id != job:
+		_garden_abort()
+		return
+	say("Ото гарно зорали конем!", 2.5)
+	Game.emit_event("plowed")
+	# з плугом — назад до воза
+	await cart._horse_to(cart.to_global(Vector3(3.2, 0, 2.0)), 1.2, 0.6)
+	cart.speed = 0.0
+	h.hitch_move(h.rotation.y, 0.0, 0.0)
+	behind_plow = null
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	if id != job:
+		return
+	await go(plow.to_global(Vector3(-0.6, 0, plow.HALF + 0.4)))
+	if id != job:
+		return
+	play("wave", 1.0)
+	await wait(1.0)
+	plow.unhitch()
+	say("Плуга — на віз.", 2.0)
+	if not await _carry_plow(id, plow, plow.bed_xf(cart)):
+		return
+	plow.put_in_cart(cart)
+	if not await _harness_horse(id, cart, h):
+		return
+	if not await _to_climb_spot(id, cart):
+		return
+	await _cart_climb_on(cart)
+	await _home_and_unload(id, cart, plow)
 
 
 func _fruit_color(fruit: String) -> Color:
