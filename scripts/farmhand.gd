@@ -87,6 +87,17 @@ func act(kind: String, secs: float) -> void:
 
 func _arrive() -> void:
 	var id := begin_job("arrive")
+	if bike:
+		await _out_of_hut()
+		await _mount_bike()
+		await _ride(_ride_go())
+		await _dismount_bike(bike_farm)
+		for wp in farm_walk:
+			await _goto(wp)
+		on_duty = true
+		await on_arrived()
+		end_job(id)
+		return
 	await appear()
 	for wp in way:
 		await _goto(wp)
@@ -98,6 +109,19 @@ func _arrive() -> void:
 func _leave() -> void:
 	var id := begin_job("leave")
 	await before_leave()
+	if bike:
+		if in_yard:
+			await back_farm()
+		for i in range(farm_walk.size() - 1, -1, -1):
+			await _goto(farm_walk[i])
+		on_duty = false                    # уже йде додому — справ на фермі не бере
+		await _mount_bike()
+		await _ride(_ride_back())
+		await _dismount_bike(hut["bike"])
+		await _into_hut()
+		on_duty = false
+		end_job(id)
+		return
 	var from := way.size() - 1
 	if in_yard:
 		var w = main.world
@@ -173,3 +197,232 @@ func before_leave() -> void:
 
 func work_step() -> void:
 	pass
+
+
+# ----- велосипед: зранку з хати (крізь двері й хвіртку) — велосипедом на ферму, увечері — назад
+var bike: Node3D = null
+var hut := {}                          # хата: точки від дверей до вулиці, двері, хвіртка, де стоїть велосипед
+var ride_way: Array = []               # велосипедом: від під'їзду до хати — до ферми (дорогою понад річкою)
+var bike_farm := Transform3D()         # де велосипед стоїть на фермі
+var farm_walk: Array = []              # від велосипеда на фермі — пішки до роботи
+var _on_bike := false
+var _near_hut := false
+var _ride_pts: Array = []
+var _ride_i := 0
+var _ride_v := 0.0
+var _ride_t := 0.0
+var _ride_end := false
+var _hip_h := 0.9
+
+
+func give_bike(b: Node3D, info: Dictionary, route: Array, park: Transform3D, walk: Array) -> void:
+	bike = b
+	hut = info
+	ride_way = route
+	bike_farm = park
+	farm_walk = walk
+	bike.global_transform = park if on_duty else (info["bike"] as Transform3D)
+
+
+func _process(delta: float) -> void:
+	if _on_bike and bike:
+		if _bubble_left > 0.0:
+			_bubble_left -= delta
+			if _bubble_left <= 0.0:
+				bubble.visible = false
+		_ride_step(delta)
+		return
+	super(delta)
+	if _near_hut and visible and main:
+		var bz = main.world.outer.bazaar
+		if bz:
+			global_position.y = bz.floor_y(global_position, global_position.y)
+
+
+func _entry() -> Array:
+	## З вулиці біля хвіртки — на під'їзд до головної дороги.
+	var st: Vector3 = hut["street"]
+	if absf(st.x) > 6.5:
+		return [st, Vector3(signf(st.x) * 6.0, 0, st.z)]
+	return [st]
+
+
+func _ride_go() -> Array:
+	return _entry() + ride_way + [bike_farm.origin]
+
+
+func _ride_back() -> Array:
+	var back := ride_way.duplicate()
+	back.reverse()
+	var en := _entry()
+	en.reverse()
+	return back + en + [(hut["bike"] as Transform3D).origin]
+
+
+func _hand_to(at: Vector3) -> void:
+	## Повертається до дверей (хвіртки) і тягне рукою — відчиняє чи зачиняє.
+	face(at)
+	await wait(0.4)
+	busy = true
+	if anims.get("open_door", "") != "":
+		current = ""
+		play("open_door", 1.25)
+		await wait(clampf(anim_length("open_door") / 1.25, 0.6, 1.3))
+	elif pose:
+		var t := 0.0
+		while t < 0.7:
+			t += get_process_delta_time()
+			pose.carry = sin(clampf(t / 0.7, 0.0, 1.0) * PI)
+			await get_tree().process_frame
+		pose.carry = 0.0
+	busy = false
+	play("idle")
+
+
+func _through(n: Node, at: Vector3, beyond: Vector3) -> void:
+	## Відчиняє двері (хвіртку), проходить крізь них і зачиняє за собою.
+	var bz = main.world.outer.bazaar if main else null
+	await _hand_to(at)
+	if bz:
+		bz.npc_door(n, true, global_position)
+	await wait(0.6)
+	await go(beyond, false, false)
+	await _hand_to(at)
+	if bz:
+		bz.npc_door(n, false)
+	await wait(0.3)
+
+
+func _out_of_hut() -> void:
+	## Зранку виходить із хати крізь двері, двором до хвіртки, відчиняє її, виходить і зачиняє.
+	position = hut["inside"]
+	var to: Vector3 = (hut["door_out"] as Vector3) - (hut["inside"] as Vector3)
+	rotation.y = atan2(to.x, to.z)
+	_near_hut = true
+	_show(true)
+	await _through(hut["door"], hut["door_at"], hut["door_out"])
+	await go(hut["gate_in"], false, false)
+	await _through(hut["gate"], hut["gate_at"], hut["gate_out"])
+	_near_hut = false
+	global_position.y = 0.0
+
+
+func _into_hut() -> void:
+	## Увечері: крізь хвіртку у двір (відчиняє й зачиняє), крізь двері в хату — і там до ранку.
+	_near_hut = true
+	await go(hut["gate_out"], false, false)
+	await _through(hut["gate"], hut["gate_at"], hut["gate_in"])
+	await go(hut["door_out"], false, false)
+	await _through(hut["door"], hut["door_at"], hut["inside"])
+	_show(false)
+	_near_hut = false
+
+
+func _bike_ik(w: float) -> Dictionary:
+	var bb := bike.global_transform.basis.orthonormalized()
+	return {"LeftHand": [bike.grip_global(true) + bb * Vector3(0, 0.02, -0.035), w],
+		"RightHand": [bike.grip_global(false) + bb * Vector3(0, 0.02, -0.035), w],
+		"LeftFoot": [bike.pedal_global(true) + bb * Vector3(0, 0.06, -0.03), w],
+		"RightFoot": [bike.pedal_global(false) + bb * Vector3(0, 0.06, -0.03), w]}
+
+
+func _mount_bike() -> void:
+	## Підходить до велосипеда зліва, бере кермо й сідає на сідло.
+	var b := bike
+	var left: Vector3 = b.global_transform.basis.x.normalized()
+	await go(b.global_position + left * 0.55, false, false)
+	face(b.global_position + b.global_transform.basis.z * 3.0)
+	await wait(0.5)
+	stop()
+	busy = true
+	_hip_h = maxf(0.4, hips_world().y - global_position.y)
+	var h0 := hips_world()
+	var y0 := rotation.y
+	var t := 0.0
+	while t < 1.0:
+		t = minf(1.0, t + get_process_delta_time() / 0.9)
+		var e := t * t * (3.0 - 2.0 * t)
+		rotation.y = lerp_angle(y0, b.rotation.y, e)
+		if pose:
+			pose.life = 0.0
+			pose.lean = 0.5 * e
+			pose.ik = _bike_ik(e)
+		place_hips(h0.lerp(b.to_global(b.seat_local()), e) + Vector3(0, sin(t * PI) * 0.12, 0))
+		await get_tree().process_frame
+	busy = false
+	_on_bike = true
+
+
+func _dismount_bike(park: Transform3D) -> void:
+	## Зупиняється, злазить ліворуч і ставить велосипед на місце.
+	_on_bike = false
+	busy = true
+	var b := bike
+	var left: Vector3 = b.global_transform.basis.x.normalized()
+	var g := b.global_position + left * 0.55
+	g.y = 0.0
+	var h0 := hips_world()
+	var t := 0.0
+	while t < 1.0:
+		t = minf(1.0, t + get_process_delta_time() / 0.8)
+		var e := t * t * (3.0 - 2.0 * t)
+		if pose:
+			pose.lean = 0.5 * (1.0 - e)
+			pose.ik = _bike_ik(1.0 - e)
+		place_hips(h0.lerp(g + Vector3(0, _hip_h, 0), e) + Vector3(0, sin(t * PI) * 0.1, 0))
+		await get_tree().process_frame
+	global_position = g
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	# ставить велосипед рівно на його місце
+	var t0 := b.global_transform
+	t = 0.0
+	while t < 1.0:
+		t = minf(1.0, t + get_process_delta_time() / 0.6)
+		b.global_transform = t0.interpolate_with(park, t * t * (3.0 - 2.0 * t))
+		await get_tree().process_frame
+	busy = false
+	play("idle")
+
+
+func _ride(pts: Array) -> void:
+	_ride_pts = pts
+	_ride_i = 0
+	_ride_v = 0.0
+	_ride_t = 0.0
+	_ride_end = false
+	while not _ride_end and is_inside_tree():
+		await get_tree().process_frame
+
+
+func _ride_step(delta: float) -> void:
+	var b := bike
+	if _ride_i < _ride_pts.size():
+		var tg: Vector3 = _ride_pts[_ride_i]
+		var to := tg - b.global_position
+		to.y = 0.0
+		var d := to.length()
+		var last := _ride_i == _ride_pts.size() - 1
+		if last:
+			_ride_t += delta
+		if d < (0.35 if last else 1.6) or (last and _ride_t > 8.0):
+			_ride_i += 1
+		var want := atan2(to.x, to.z) if d > 0.05 else b.rotation.y
+		var diff := angle_difference(b.rotation.y, want)
+		b.rotation.y = lerp_angle(b.rotation.y, want, 1.0 - exp(-delta * 2.6))
+		var vmax := clampf(d * 0.9, 0.5, 4.0) if last else 4.0
+		vmax *= clampf(1.0 - absf(diff) / 1.6, 0.3, 1.0)
+		_ride_v = move_toward(_ride_v, vmax, delta * 1.6)
+		b.global_position += Vector3(sin(b.rotation.y), 0, cos(b.rotation.y)) * _ride_v * delta
+		b.ride_anim(_ride_v, clampf(diff * 0.8, -0.5, 0.5), delta)
+	else:
+		_ride_v = 0.0
+		b.ride_anim(0.0, 0.0, delta)
+		_ride_end = true
+	rotation.y = b.rotation.y
+	if pose:
+		pose.life = 0.0
+		pose.lean = 0.5
+		pose.ik = _bike_ik(1.0)
+	place_hips(b.to_global(b.seat_local()))

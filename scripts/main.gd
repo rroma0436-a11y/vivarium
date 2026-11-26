@@ -459,7 +459,7 @@ func _watch_doors(dt: float) -> void:
 	var mv: Array = []
 	if Game.state["location"] == "yard" and not beep.piloting and beep.lift < 3.0:
 		mv.append(beep.global_position)
-	for w in [grandpa, girl if not _ctl_girl else null, kid, gvintyk, puppy]:
+	for w in [grandpa, girl if not _ctl_girl else null, kid, gvintyk, puppy, groom, shepherd]:
 		if w and is_instance_valid(w) and w.visible and (w as Node3D).global_position.z > -500.0:
 			mv.append((w as Node3D).global_position)
 	for g in geese:
@@ -1338,6 +1338,56 @@ func _spawn_workers() -> void:
 		kid.start_farm(_home_door(1.0, 0), _home_way(1.0, 0) + in_farm + [Vector3(-172.0, 0, 33.0)], 7.0, 19.0, 4)
 	if gvintyk:
 		gvintyk.start_farm(_home_door(-1.0, 0), _home_way(-1.0, 0) + in_farm + [Vector3(-171.5, 0, 31.0), Vector3(-152.0, 0, 32.0), Vector3(-143.0, 0, 46.0)], 7.2, 19.2, 4)
+	var k := 0
+	for e in [[kid, 1.0, 0], [gvintyk, -1.0, 0], [groom, 1.0, 1], [shepherd, -1.0, 1]]:
+		if e[0]:
+			_give_bike(e[0], e[1], e[2], k, in_farm[0])
+		k += 1
+
+
+# ------------------------------------------------------------------ велосипеди працівників (на роботу й з роботи)
+const WORKER_BIKE := 1.25                       # трохи більші за Ніччин
+const FARM_BIKES := [Vector3(-174.5, 0, 79.5), Vector3(-176.0, 0, 79.5), Vector3(-177.5, 0, 79.5), Vector3(-179.0, 0, 79.5)]   # на фермі біля південних воріт
+var worker_bikes: Array = []
+
+
+func _give_bike(w, sx: float, row: int, k: int, in_farm: Vector3) -> void:
+	var bz = world.outer.bazaar
+	if bz == null or not ResourceLoader.exists("res://assets/models/bicycle.glb"):
+		return
+	var o = world.outer
+	var info: Dictionary = bz.hut_info(Vector3(sx * o.HUT_X, 0, o.HUT_Z0 + o.HUT_STEP * row))
+	if info.is_empty():
+		return
+	var b := preload("res://scripts/bike.gd").new()
+	b.name = "WorkerBike_%d" % k
+	b.size = WORKER_BIKE
+	b.pickable = false
+	world.yard_root.add_child(b)
+	if not b.setup():
+		b.queue_free()
+		return
+	worker_bikes.append(b)
+	var park := Transform3D(Basis(Vector3.UP, PI), FARM_BIKES[k])
+	var at := (w.way as Array).find(in_farm)
+	var tail: Array = (w.way as Array).slice(at + 1) if at >= 0 else []
+	var walk: Array = [Vector3(-171.5, 0, 77.0), Vector3(-171.5, 0, 34.0)] + tail
+	w.give_bike(b, info, _bike_way(sx, row), park, walk)
+
+
+func _bike_way(sx: float, row: int) -> Array:
+	## Велосипедом: з під'їзду на головну дорогу, повз фонтан на південь до річки,
+	## дорогою понад річкою на захід — і крізь південні ворота на ферму.
+	var o = world.outer
+	var z: float = o.HUT_Z0 + o.HUT_STEP * row
+	var pts: Array = []
+	if z < o.VILLAGE.z:
+		pts = [Vector3(sx * 7.5, 0, o.VILLAGE.z), Vector3(sx * 6.0, 0, o.VILLAGE.z + 5.0), Vector3(sx * 2.0, 0, o.VILLAGE.z + 9.0)]
+	else:
+		pts = [Vector3(sx * 2.0, 0, z + 2.5)]
+	pts += [Vector3(sx * 2.0, 0, 89.5), Vector3(-5.0, 0, 94.8), Vector3(-60.0, 0, 95.0), Vector3(-120.0, 0, 95.0),
+		Vector3(-165.0, 0, 95.0), Vector3(-171.5, 0, 90.5), Vector3(-171.5, 0, 85.0), Vector3(-171.5, 0, 81.0)]
+	return pts
 
 
 func _home_door(sx: float, row: int) -> Vector3:

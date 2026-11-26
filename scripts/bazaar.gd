@@ -702,7 +702,7 @@ func step(delta: float, who: Array, cam: Vector3, me := Vector3.INF) -> void:
 					near = true
 				else:
 					d["held"] = false
-			d["want"] = 1.0 if near else 0.0
+			d["want"] = 1.0 if near or int(d.get("npc", 0)) > 0 else 0.0
 		for s in sellers:
 			var far: bool = (s["pos"] as Vector3).distance_to(cam) > 60.0
 			(s["model"] as Node3D).visible = not far
@@ -830,22 +830,26 @@ func door_ahead(p: Vector3, dir: Vector3):
 
 func open_by_hand(d: Dictionary, from := Vector3.INF) -> void:
 	if from != Vector3.INF and float(d["k"]) < 0.05:
-		# стулка відчиняється від Ніки, а не крізь неї
-		var n := d["node"] as Node3D
-		var hinge: Vector3 = (n.get_parent() as Node3D).global_transform * (d["base"] as Transform3D).origin
-		var v: Vector3 = (d["pos"] as Vector3) - hinge
-		v.y = 0.0
-		var best := float(d["sign"])
-		var best_d := -INF
-		for sgn in [-1.0, 1.0]:
-			var q: Vector3 = hinge + Basis(Vector3.UP, deg_to_rad(95.0) * sgn) * v
-			var dd := Vector2(q.x - from.x, q.z - from.z).length()
-			if dd > best_d:
-				best_d = dd
-				best = sgn
-		d["sign"] = best
+		_swing_away(d, from)
 	d["want"] = 1.0
 	d["held"] = true
+
+
+func _swing_away(d: Dictionary, from: Vector3) -> void:
+	## Стулка відчиняється від того, хто відчиняє, а не крізь нього.
+	var n := d["node"] as Node3D
+	var hinge: Vector3 = (n.get_parent() as Node3D).global_transform * (d["base"] as Transform3D).origin
+	var v: Vector3 = (d["pos"] as Vector3) - hinge
+	v.y = 0.0
+	var best := float(d["sign"])
+	var best_d := -INF
+	for sgn in [-1.0, 1.0]:
+		var q: Vector3 = hinge + Basis(Vector3.UP, deg_to_rad(95.0) * sgn) * v
+		var dd := Vector2(q.x - from.x, q.z - from.z).length()
+		if dd > best_d:
+			best_d = dd
+			best = sgn
+	d["sign"] = best
 
 
 # ------------------------------------------------------------------ товар: старий простий прибираємо (новий — у bz_goods)
@@ -868,6 +872,67 @@ func _remove_old_goods() -> void:
 
 # ------------------------------------------------------------------ старе село: тин, ворітця, лавки, город, копиці, криниця з журавлем
 var village_nodes: Array = []                    # [вузол хати, [позиція, поворот, зелена?]]
+var village_info: Array = []                     # для працівників ферми: точки від хати крізь двері й хвіртку на вулицю
+
+
+func _village_way(pos: Vector3, bs: Basis, dmi: Node, gleaf: Node, dl: Vector3, side: float, gx: float, gz: float, hx: float, zf: float) -> void:
+	## Шлях із хати: усередині → за дверима → перед хвірткою (у дворі) → за хвірткою → вулиця; де стоїть велосипед.
+	var w := func(v: Vector3) -> Vector3:
+		return pos + bs * v
+	var e := {"pos": pos, "door": dmi, "gate": gleaf, "door_at": w.call(Vector3(dl.x, 0, dl.z))}
+	var bike_p: Vector3
+	var bike_f: Vector3
+	if side == 0.0:
+		e["inside"] = w.call(Vector3(dl.x, 0, dl.z - 1.0))
+		e["door_out"] = w.call(Vector3(dl.x, 0, dl.z + 1.0))
+		e["gate_at"] = w.call(Vector3(gx, 0, zf))
+		e["gate_in"] = w.call(Vector3(gx, 0, zf - 1.1))
+		e["gate_out"] = w.call(Vector3(gx, 0, zf + 1.1))
+		e["street"] = w.call(Vector3(gx, 0, zf + 2.2))
+		var sb := 1.0 if gx <= 0.0 else -1.0            # лавочка — з цього боку від хвіртки, велосипед — з іншого
+		bike_p = Vector3(clampf(gx - sb * 2.3, -hx + 0.8, hx - 0.8), 0, zf + 0.8)
+		bike_f = Vector3(-1, 0, 0)
+	else:
+		e["inside"] = w.call(Vector3(dl.x - side * 1.0, 0, dl.z))
+		e["door_out"] = w.call(Vector3(dl.x + side * 1.0, 0, dl.z))
+		e["gate_at"] = w.call(Vector3(side * hx, 0, gz))
+		e["gate_in"] = w.call(Vector3(side * (hx - 1.1), 0, gz))
+		e["gate_out"] = w.call(Vector3(side * (hx + 1.1), 0, gz))
+		e["street"] = w.call(Vector3(side * (hx + 0.8), 0, zf + 1.5))
+		bike_p = Vector3(side * (hx + 2.0), 0, zf - 2.0)
+		bike_f = Vector3(0, 0, -side)
+	var fw: Vector3 = bs * bike_f
+	e["bike"] = Transform3D(Basis(Vector3.UP, atan2(fw.x, fw.z)), w.call(bike_p))
+	village_info.append(e)
+
+
+func hut_info(p: Vector3) -> Dictionary:
+	## Точки хати старого села, найближчої до p.
+	var best := {}
+	var bd := INF
+	for e in village_info:
+		var d: float = (e["pos"] as Vector3).distance_to(p)
+		if d < bd:
+			bd = d
+			best = e
+	return best if bd < 8.0 else {}
+
+
+func npc_door(n: Node, open: bool, from := Vector3.INF) -> void:
+	## Працівник ферми сам відчиняє (і тримає) або зачиняє двері чи хвіртку.
+	if n == null:
+		return
+	for d in doors:
+		if d["node"] != n:
+			continue
+		if open:
+			if from != Vector3.INF and float(d["k"]) < 0.05:
+				_swing_away(d, from)
+			d["npc"] = int(d.get("npc", 0)) + 1
+			d["want"] = 1.0
+		else:
+			d["npc"] = maxi(0, int(d.get("npc", 0)) - 1)
+		return
 const VILLAGE_WELL := Vector3(13.0, 0, 58.0)
 const VILLAGE_GARDEN := Vector3(0, 0, -9.4)      # центр городу (6.4 × 4.6 м) у системі садиби: за заднім тином (z = -6.4)
 
@@ -1116,10 +1181,13 @@ func _village_props() -> void:
 		if side != 0.0:
 			gate_xf = Transform3D(bs * Basis(Vector3.UP, PI / 2.0), pos + bs * Vector3(side * hx, 0, gz))
 		var gate := _vput(lib, holder, inv, "Ворітця", gate_xf)
+		var gleaf: MeshInstance3D = null
 		if gate:
 			var leaf := gate.find_child("Ворітця_стулка*", true, false) as MeshInstance3D
 			if leaf:
 				_add_door(leaf, h, true)
+				gleaf = leaf
+		_village_way(pos, bs, dmi, gleaf, dl, side, gx, gz, hx, zf)
 		var bxl := gx + (2.6 if gx <= 0.0 else -2.6)
 		var bench := _vput(lib, holder, inv, "Лавка_спинка" if k % 2 == 0 else "Лавка", Transform3D(bs, pos + bs * Vector3(bxl, 0, zf + 0.55)))
 		if bench is MeshInstance3D:

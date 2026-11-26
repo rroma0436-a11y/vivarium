@@ -17,13 +17,15 @@ var _base := {}
 var _grip := [Vector3.ZERO, Vector3.ZERO]          # точки руків'їв у системі керма
 var _wheel_a := 0.0
 var _steer := 0.0
+var size := 1.0                                   # більший велосипед (для працівників ферми) — ставити до setup()
+var pickable := true                              # Ніка може сісти (лише її велосипед)
 
 
 func setup() -> bool:
 	if not ResourceLoader.exists("res://assets/models/bicycle.glb"):
 		return false
 	model = load("res://assets/models/bicycle.glb").instantiate()
-	model.scale = Vector3.ONE * K
+	model.scale = Vector3.ONE * K * size
 	add_child(model)
 	steer = model.find_child("Рульова_вісь", true, false)
 	wheel_f = model.find_child("Колесо_П", true, false)
@@ -36,10 +38,15 @@ func setup() -> bool:
 			_base[n] = (n as Node3D).transform
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).visibility_range_end = 90.0
-	area = Util.pick_area("bike", Vector3(0.6, 0.75, 0.95), Vector3(0, 0.38, 0))
-	add_child(area)
-	add_child(Util.blob_shadow(0.4, 0.3))
+	if pickable:
+		area = Util.pick_area("bike", Vector3(0.6, 0.75, 0.95), Vector3(0, 0.38, 0))
+		add_child(area)
+	add_child(Util.blob_shadow(0.4 * size, 0.3))
 	return true
+
+
+func seat_local() -> Vector3:
+	return SEAT_HIPS * size
 
 
 func _grip_init() -> void:
@@ -52,7 +59,7 @@ func _grip_init() -> void:
 
 func grip_global(left: bool) -> Vector3:
 	if steer == null:
-		return to_global(Vector3(0.14 if left else -0.14, 0.52, 0.08))
+		return to_global(Vector3(0.14 if left else -0.14, 0.52, 0.08) * size)
 	_grip_init()
 	return steer.global_transform * (_grip[0] if left else _grip[1])
 
@@ -60,7 +67,7 @@ func grip_global(left: bool) -> Vector3:
 func pedal_global(left: bool) -> Vector3:
 	var p: Node3D = pedal_l if left else pedal_r
 	if p == null:
-		return to_global(Vector3(0.07 if left else -0.07, 0.12, 0.0))
+		return to_global(Vector3(0.07 if left else -0.07, 0.12, 0.0) * size)
 	return p.global_transform * Vector3(0.07 if left else -0.07, 0, 0)
 
 
@@ -73,7 +80,7 @@ func set_tilt(a: float) -> void:
 func ride_anim(v: float, steer_to: float, dt: float) -> void:
 	## v — швидкість (м/с), steer_to — куди повернуто кермо (рад).
 	_grip_init()
-	_wheel_a = wrapf(_wheel_a + v / R_WHEEL * dt, 0.0, TAU * 2.0)
+	_wheel_a = wrapf(_wheel_a + v / (R_WHEEL * size) * dt, 0.0, TAU * 2.0)
 	_steer = lerpf(_steer, steer_to, 1.0 - exp(-dt * 6.0))
 	for w in [wheel_f, wheel_r]:
 		if w:
