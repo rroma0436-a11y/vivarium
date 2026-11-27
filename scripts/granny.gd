@@ -35,6 +35,11 @@ var hoe: Node3D                       # сапка (у сараї під сті�
 var patch: Node3D                     # бабусин город за соняшниками
 var weeds: Array = []                 # [вузол, z грядки]
 var _weed_day := -1
+var _hoe_on := false                  # сапка в обох руках (несе навскіс або сапає)
+var _hoe_w := 0.0                     # вага пози рук на сапці
+var _hoe_dig := 0.0                   # 0 — несе навскіс перед собою, 1 — сапає грядку
+var _hoe_dig_to := 0.0
+var _hoe_ph := 0.0                    # фаза помаху: замах — удар у землю — тягне до себе
 var pot: Node3D                       # баняк (на столику в хаті)
 var _soup: MeshInstance3D
 var tray: Node3D                      # деко для пиріжків
@@ -137,6 +142,8 @@ func _process(delta: float) -> void:
 		stool.global_transform = Transform3D(Basis(Vector3.UP, rotation.y), hand_l.global_position - Vector3(0, stool_h - 0.02, 0) + f * 0.05)
 	if _milking:
 		_milk_step(delta)
+	if _hoe_on:
+		_hoe_step(delta)
 	if on_tractor and not _boarding:
 		if not is_instance_valid(on_tractor):
 			on_tractor = null
@@ -682,6 +689,7 @@ func cancel_job() -> void:
 func _reset_tools() -> void:
 	## Справу перервали: руки вільні, стільчик і дійниця — на своїх місцях, корова — знову пасеться.
 	_stop_milking()
+	_hoe_stop()
 	_stool_carry = false
 	if pose:
 		pose.carry = 0.0
@@ -1297,6 +1305,11 @@ func _garden(id: int) -> void:
 		await _pick_up(hoe, 0.42, 0.1, false)
 		if id != job:
 			return
+		_hoe_on = true
+		_hoe_w = 0.0
+		_hoe_dig = 0.0
+		_hoe_dig_to = 0.0
+		_hoe_ph = 0.0
 		if not await _out_of_barn(id, HOE_WAY):
 			return
 	else:
@@ -1325,21 +1338,41 @@ func _garden(id: int) -> void:
 			if id != job:
 				return
 			face(Vector3(x, 0, bz))
+			if tool_ok:
+				_hoe_dig_to = 1.0
+				_hoe_ph = 0.0
 			await wait(0.2)
 			busy = true
 			if not tool_ok:
 				play("bend")
 			for c in 2:
 				var t := 0.0
+				var hit := false
 				while t < 0.8:
 					await get_tree().process_frame
 					if id != job:
 						return
-					t += get_process_delta_time()
+					var dt := get_process_delta_time()
+					t += dt
 					if tool_ok and pose:
-						pose.lean = 0.12 + 0.4 * sin(clampf(t / 0.8, 0.0, 1.0) * PI)
-				_burst(_dirt_fx, Vector3(x, 0.15, bz + 0.1), Vector3(0, 1.0, 0.4), 1.0)
+						var u := clampf(t / 0.8, 0.0, 1.0)
+						_hoe_ph = u
+						# низько нагнулась над грядкою: на замаху ледь випрямляється, на ударі — ще нижче
+						var want := 0.78 - 0.1 * sin(clampf(u / 0.5, 0.0, 1.0) * PI) + 0.06 * clampf((u - 0.5) / 0.15, 0.0, 1.0)
+						pose.lean = lerpf(float(pose.lean), want, clampf(dt * 8.0, 0.0, 1.0))
+					if not hit and t >= (0.52 if tool_ok else 0.8):
+						hit = true
+						_burst(_dirt_fx, Vector3(x, 0.15, bz + 0.1), Vector3(0, 1.0, 0.4), 1.0)
+			_hoe_dig_to = 0.0
+			_hoe_ph = 0.0
 			if pose:
+				var t2 := 0.0
+				while t2 < 0.25 and pose:
+					await get_tree().process_frame
+					if id != job:
+						return
+					t2 += get_process_delta_time()
+					pose.lean = lerpf(float(pose.lean), 0.0, clampf(t2 / 0.25, 0.0, 1.0))
 				pose.lean = 0.0
 			for w in weeds:
 				if float(w[1]) == bz and absf((w[0] as Node3D).position.x - x) < 0.5:
@@ -1356,6 +1389,7 @@ func _garden(id: int) -> void:
 			return
 		face(hoe.get_meta("home_tr", Transform3D()).origin + (hoe.get_meta("home_parent") as Node3D).global_position)
 		await wait(0.3)
+		_hoe_stop()
 		busy = true
 		play("pick")
 		await wait(0.6)
@@ -1363,6 +1397,74 @@ func _garden(id: int) -> void:
 		await wait(0.3)
 		busy = false
 		await _out_of_barn(id, HOE_WAY)
+
+
+func _hoe_stop() -> void:
+	if not _hoe_on:
+		return
+	_hoe_on = false
+	_hoe_dig = 0.0
+	_hoe_dig_to = 0.0
+	if pose:
+		var ik0: Dictionary = pose.ik.duplicate()
+		ik0.erase("RightHand")
+		ik0.erase("LeftHand")
+		pose.ik = ik0
+
+
+func _hoe_step(delta: float) -> void:
+	## Сапка в обох руках, як на відео: несе навскіс перед собою (держак — над правим плечем,
+	## полотно — спереду внизу), а на грядці — замах угору, удар у землю й тягне сапку до себе.
+	if held != hoe or hoe == null or not is_instance_valid(hoe) or pose == null:
+		_hoe_stop()
+		return
+	_hoe_w = move_toward(_hoe_w, 1.0, delta * 3.0)
+	_hoe_dig = move_toward(_hoe_dig, _hoe_dig_to, delta * 4.0)
+	var f := Vector3(sin(rotation.y), 0, cos(rotation.y))
+	var l := Vector3(cos(rotation.y), 0, -sin(rotation.y))      # уліво
+	var up := Vector3.UP
+	var hp := hips_world()
+	var sy := maxf(_held_scale.y, 0.01)
+	# несе: права рука на держаку біля грудей, полотно — спереду ліворуч над землею
+	var dc := (-l * 0.5 + up * 0.8 - f * 0.35).normalized()
+	var rc := hp + f * 0.28 + up * 0.22 - l * 0.08
+	var head_c := rc - dc * 0.95 * sy
+	# сапає: полотно ходить над землею перед ногами, руки — низько (тулуб нахилений)
+	var p := _hoe_ph
+	var reach := 0.58
+	var lift := 0.0
+	if p < 0.5:                                   # замах
+		var e := sin(p / 0.5 * PI * 0.5)
+		reach = lerpf(0.58, 0.8, e)
+		lift = 0.4 * e
+	elif p < 0.65:                                # удар у землю
+		var e := (p - 0.5) / 0.15
+		reach = 0.8
+		lift = 0.4 * (1.0 - e * e)
+	else:                                         # тягне до себе
+		var e := (p - 0.65) / 0.35
+		reach = lerpf(0.8, 0.58, e * e * (3.0 - 2.0 * e))
+	var head_d := global_position + f * reach + up * (0.04 + lift) + l * 0.04
+	var rd := hp + f * (0.24 + (reach - 0.58) * 0.5) + up * (-0.08 + lift * 0.4) - l * 0.1
+	var k := _hoe_dig * _hoe_dig * (3.0 - 2.0 * _hoe_dig)
+	var head := head_c.lerp(head_d, k)
+	var r := rc.lerp(rd, k)
+	var d := r - head
+	if d.length() < 0.05:
+		d = dc
+	d = d.normalized()
+	if r.distance_to(head) > 1.2 * sy:
+		r = head + d * 1.2 * sy
+	var z := -up + d * d.dot(up)                  # полотно — донизу, до себе
+	if z.length() < 0.01:
+		z = f
+	z = z.normalized()
+	var x := d.cross(z).normalized()
+	hoe.global_transform = Transform3D(Basis(x, d, z) * Basis.from_scale(_held_scale), head - d * 0.12 * sy)
+	var ik: Dictionary = pose.ik.duplicate()
+	ik["RightHand"] = [r, _hoe_w]
+	ik["LeftHand"] = [r - d * 0.32 * sy, _hoe_w]
+	pose.ik = ik
 
 
 # ------------------------------------------------------------------ поїздки возом із дідусем: на ринок і в ліс

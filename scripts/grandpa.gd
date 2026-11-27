@@ -2942,10 +2942,21 @@ func _wait_granny(id: int, g, on: bool) -> bool:
 	## Чекає, поки бабуся сяде на віз (on) чи злізе з нього. Передумала їхати — дід їде сам.
 	var t := 0.0
 	while id == job and t < 150.0:
-		if (g.on_tractor != null) == on or g.doing != "trip":
+		if g.doing != "trip":
 			break
+		if (g.on_tractor != null) == on:
+			if on:
+				break
+			# злазить: чекаємо, поки зовсім спуститься на землю й забере з воза свій кошик
+			var bk = g.trip_basket
+			var cart: Node3D = _main().garden_cart
+			var basket_on: bool = bk != null and is_instance_valid(bk) and cart != null and bk.get_parent() == cart
+			if not g._boarding and not basket_on:
+				break
 		await wait(0.5)
 		t += 0.5
+	if not on and id == job:
+		await wait(1.0)                      # бабуся відійшла від воза — тепер можна рушати
 	return id == job
 
 
