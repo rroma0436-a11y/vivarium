@@ -3302,7 +3302,7 @@ func _run_demo() -> void:
 			hud.flight.home_pressed.emit()
 		elif s == "persp":
 			rig.cam.projection = Camera3D.PROJECTION_PERSPECTIVE
-			rig.cam.far = 400.0
+			rig.cam.far = 700.0
 			rig.set_process(true)
 			set_process(true)
 			hud.visible = true

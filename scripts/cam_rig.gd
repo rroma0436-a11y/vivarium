@@ -51,7 +51,7 @@ func _ready() -> void:
 	cam = Camera3D.new()
 	cam.fov = 50.0
 	cam.near = 0.1
-	cam.far = 400.0
+	cam.far = 700.0         # видно ліс по краю світу
 	add_child(cam)
 
 

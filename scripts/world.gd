@@ -63,6 +63,7 @@ func _make_environment() -> void:
 shader_type sky;
 uniform sampler2D day_tex : source_color, filter_linear, repeat_enable;
 uniform sampler2D night_tex : source_color, filter_linear, repeat_enable;
+uniform sampler2D moon_tex : source_color, filter_linear;
 uniform float night = 0.0;
 uniform vec3 tint = vec3(1.0);
 uniform float spin = 0.0;
@@ -109,80 +110,75 @@ float stars(vec3 d, float scale, float dens) {
 void sky() {
 	vec3 d = normalize(EYEDIR);
 	float u = atan(d.x, -d.z) / 6.2831853 + 0.5 + spin;
-	// горизонт картинки трохи нижче середини (≈0.47) — підганяємо під лінію землі
-	float v = acos(clamp(d.y, -1.0, 1.0)) / 3.14159265;
-	v = v < 0.5 ? v * 0.94 : 0.47 + (v - 0.5) * 1.06;
-	vec2 uv = vec2(fract(u), clamp(v, 0.002, 0.998));
-	vec3 c = pano(uv);
-	// угорі картинка-панорама стягується в точку — там малюємо своє небо (купол), плавно переходячи
-	float up = smoothstep(0.34, 0.6, d.y);
-	float cl = 0.0;
+	// панорама: верхній рядок — зеніт, нижній — обрій; нижче обрію — колір обрію (там ліс і земля)
+	float el = asin(clamp(d.y, 0.0, 1.0));
+	vec3 c = pano(vec2(fract(u), clamp(1.0 - el / 1.5707963, 0.002, 0.998)));
+	// біля зеніту панорама стягується в точку — там рівний купол
+	float up = smoothstep(0.72, 0.95, d.y);
 	if (up > 0.0) {
-		vec3 edge = vec3(0.0);
-		for (int i = -4; i <= 4; i++) {
-			edge += pano(vec2(fract(u + float(i) * 0.045), 0.366));
+		vec3 dome = vec3(0.0);
+		for (int i = 0; i < 8; i++) {
+			dome += pano(vec2(float(i) * 0.125 + 0.03, 0.02));
 		}
-		edge /= 9.0;
-		vec3 zen = mix(vec3(0.3, 0.53, 0.88), vec3(0.016, 0.026, 0.085), night);
-		vec3 dome = mix(mix(edge, zen, 0.35), zen, smoothstep(0.34, 0.75, d.y));
-		c = mix(c, dome, up);
+		c = mix(c, dome / 8.0, up);
 	}
+	float cl = 0.0;
+	float above = smoothstep(-0.01, 0.02, d.y);
 	if (!AT_CUBEMAP_PASS) {
-		// хмарки, що повільно пливуть
-		if (up > 0.0) {
-			vec2 cp = d.xz / (d.y + 0.2) * 1.5 + vec2(sky_time * 0.006, sky_time * 0.002);
-			cl = smoothstep(0.44, 0.72, fbm(cp)) * up;
-			vec3 ccol = mix(vec3(1.0, 0.98, 0.96), vec3(0.1, 0.12, 0.2), night);
-			c = mix(c, ccol, cl * 0.8);
-		}
 		vec3 sd = normalize(sun_dir);
 		vec3 md = normalize(moon_dir);
-		float high = smoothstep(0.1, 0.3, d.y);
-		// сонце
-		float sv = (1.0 - night) * smoothstep(-0.02, 0.08, sd.y);
+		// сонце з м'яким сяйвом і променями
+		float sv = (1.0 - night) * smoothstep(-0.05, 0.03, sd.y) * above;
 		if (sv > 0.001) {
-			float s = max(dot(d, sd), 0.0);
-			vec3 scol = mix(vec3(1.0, 0.62, 0.36), vec3(1.0, 0.97, 0.88), smoothstep(0.05, 0.5, sd.y));
-			float disk = smoothstep(0.99925, 0.9994, s) * high;
-			float glow = pow(s, 300.0) * 0.7 + pow(s, 20.0) * 0.16;
-			c += scol * (disk * 2.6 + glow * (0.4 + 0.6 * high)) * sv * (1.0 - cl * 0.7);
+			float ang = acos(clamp(dot(d, sd), -1.0, 1.0));
+			vec3 s1 = normalize(cross(sd, vec3(0.0, 1.0, 0.0)));
+			vec3 s2 = cross(s1, sd);
+			float rot = atan(dot(d, s2), dot(d, s1));
+			float rays = pow(0.5 + 0.5 * cos(rot * 13.0 + sin(rot * 3.0) * 0.7), 4.0) * smoothstep(0.05, 0.18, ang);
+			vec3 add = vec3(0.25, 0.16, 0.06) * exp(-ang * 2.5)
+				+ vec3(0.35, 0.5, 0.12) * exp(-ang * 7.0)
+				+ vec3(0.25, 0.13, 0.07) * rays * exp(-ang * 2.2);
+			c += add * sv;
+			float disk = smoothstep(0.075, 0.064, ang);
+			vec3 dcol = mix(vec3(1.0, 0.92, 0.45), vec3(1.0, 0.7, 0.2), smoothstep(0.0, 0.075, ang));
+			c = mix(c, dcol, disk * sv);
 		}
-		// зорі й Чумацький Шлях
-		float nv = night * smoothstep(0.3, 0.45, d.y) * (1.0 - cl);
+		// зорі в куполі (нижче — зорі з картинки)
+		float nv = night * up;
 		if (nv > 0.01) {
 			float st = stars(d, 170.0, 0.09) + stars(d, 60.0, 0.05) * 1.6;
-			vec3 mwn = normalize(vec3(0.55, 0.25, 0.8));
-			float band = exp(-pow(dot(d, mwn) * 4.0, 2.0));
-			float mw = band * smoothstep(0.35, 0.8, fbm(vec2(d.x + d.z * 0.6, d.y - d.z * 0.4) * 7.0));
-			c += (vec3(0.9, 0.93, 1.0) * st * 1.5 + vec3(0.35, 0.38, 0.55) * mw * 0.35) * nv;
+			c += vec3(0.9, 0.93, 1.0) * st * 1.2 * nv;
 		}
-		// місяць із фазою
-		float mv = smoothstep(0.3, 0.7, night) * high;
+		// місяць (з картинки) з фазою
+		float mv = smoothstep(0.3, 0.7, night) * above;
 		float mdot = dot(d, md);
-		if (mv > 0.001 && mdot > 0.98) {
+		if (mv > 0.001 && mdot > 0.97) {
 			vec3 t1 = normalize(cross(md, vec3(0.0, 1.0, 0.0)));
 			vec3 t2 = cross(t1, md);
-			vec2 p = vec2(dot(d, t1), dot(d, t2)) / 0.045;
-			float r2 = dot(p, p);
-			float a = smoothstep(1.0, 0.9, r2);
-			if (a > 0.0) {
+			vec2 p = vec2(dot(d, t1), dot(d, t2)) / 0.07;
+			vec2 suv = vec2(0.5 + p.x / 5.263, 0.5 - p.y / 5.263);
+			if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0) {
+				vec3 mt = texture(moon_tex, suv).rgb;
+				float r2 = dot(p, p);
+				float a = smoothstep(1.0, 0.9, r2);
 				vec3 n = vec3(p, sqrt(max(1.0 - r2, 0.0)));
 				vec3 L = vec3(sin(moon_phase), 0.0, -cos(moon_phase));
 				float lit = smoothstep(-0.04, 0.1, dot(n, L));
-				float spots = 0.72 + 0.28 * fbm(p * 2.2 + vec2(3.1, 1.7));
-				vec3 mcol = vec3(1.0, 0.98, 0.9) * spots * lit * 1.7 + vec3(0.05, 0.06, 0.1) * (1.0 - lit);
-				c = mix(c, mcol, a * mv * (1.0 - cl * 0.6));
+				float full = 0.5 - 0.5 * cos(moon_phase);
+				c = mix(c, c * 0.3 + vec3(0.01, 0.012, 0.03), a * (1.0 - lit) * mv);
+				c += mt * mv * mix(0.3 + 0.7 * full, lit, a);
 			}
-			c += vec3(0.5, 0.6, 0.9) * pow(max(mdot, 0.0), 900.0) * 0.35 * mv;
 		}
 	}
-	COLOR = c * tint;
+	// картинки неба підготовлені під filmic і exposure 0.76 — у грі вони виглядають як оригінал
+	COLOR = c * tint * 1.53;
 }
 """
 	sky_mat = ShaderMaterial.new()
 	sky_mat.shader = sh
 	sky_mat.set_shader_parameter("day_tex", load("res://assets/sky/day.jpg"))
 	sky_mat.set_shader_parameter("night_tex", load("res://assets/sky/night.jpg"))
+	sky_mat.set_shader_parameter("moon_tex", load("res://assets/sky/moon.png"))
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_32
@@ -258,7 +254,7 @@ func update_time(_force := false) -> void:
 	var tint := Color(0.86, 0.86, 0.88).lerp(Color(0.95, 0.78, 0.72), dusk * 0.8)
 	sky_mat.set_shader_parameter("night", n)
 	sky_mat.set_shader_parameter("tint", Vector3(tint.r, tint.g, tint.b))
-	env.fog_light_color = Color(0.7, 0.78, 0.82).lerp(Color(0.16, 0.2, 0.36), n).lerp(Color(0.95, 0.75, 0.62), dusk * 0.5)
+	env.fog_light_color = Color(0.95, 0.56, 0.4).lerp(Color(0.2, 0.17, 0.45), n).lerp(Color(0.95, 0.62, 0.48), dusk * 0.5)    # під колір обрію нового неба
 	# вогники: вікна хати, кімнати, світлячки
 	for l in window_lights:
 		(l as OmniLight3D).light_energy = 1.4 * smoothstep(0.3, 0.8, n)
@@ -770,20 +766,10 @@ func _in_house(p: Vector3) -> bool:
 
 
 func _make_horizon() -> void:
-	## Кільце м'яких пагорбів і дерев довкола — ховає край землі й зливається з панорамою.
+	## Край світу обсаджено лісом (замість пагорбів) і дерева довкола двору.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 3
-	var hill := Util.mat(Color(0.42, 0.56, 0.27), 1.0)
-	var hill2 := Util.mat(Color(0.5, 0.62, 0.3), 1.0)
-	for i in 46:
-		var a := float(i) / 46.0 * TAU + rng.randf() * 0.08
-		var r := rng.randf_range(300, 340)
-		var p := Vector3(sin(a) * r, -rng.randf_range(6.0, 12.0), cos(a) * r + 20.0)
-		var s := Vector3(rng.randf_range(45, 70), rng.randf_range(24.0, 42.0), rng.randf_range(30, 45))
-		var hm := Util.sphere(1.0, hill if i % 2 == 0 else hill2, p, s)
-		hm.rotation.y = a
-		hm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		yard_root.add_child(hm)
+	_make_edge_forest()
 	# сосни з Meshy за тином (одна модель, кілька копій різного розміру)
 	if Models.exists("pine"):
 		var pines := [Vector3(-13, 0, -19.5), Vector3(-25, 0, -9), Vector3(12, 0, -17), Vector3(-28, 0, -16),
@@ -824,6 +810,62 @@ func _make_horizon() -> void:
 			var tm := Models.spawn(yard_root, k, hgt)
 			tm.position = p
 			tm.rotation.y = rng.randf() * TAU
+
+
+func _make_edge_forest() -> void:
+	## Густий ліс по краю світу — смуга за межею, куди можна зайти (±440 м), до краю землі (±500 м).
+	var kinds := ["pine_lo", "birch_b_lo", "pine_lo", "birch_a_lo"]
+	var heights := {"pine_lo": [10.0, 16.0], "birch_b_lo": [9.0, 13.0], "birch_a_lo": [8.5, 12.5]}
+	var r0 := 447.0
+	var r1 := 492.0
+	var cell := 6.5
+	var chunk := 60.0
+	var rf := RandomNumberGenerator.new()
+	rf.seed = 909
+	var buckets := {}
+	var n := int(ceil(r1 * 2.0 / cell))
+	for ix in n:
+		for iz in n:
+			var p := Vector3(-r1 + (ix + rf.randf_range(0.15, 0.85)) * cell, 0, -r1 + (iz + rf.randf_range(0.15, 0.85)) * cell)
+			var m := maxf(absf(p.x), absf(p.z))
+			if m < r0 or m > r1:
+				continue
+			if absf(p.z - 102.0) < 8.0 and m < 466.0:
+				continue     # річка входить у ліс
+			var k: String = kinds[rf.randi() % kinds.size()]
+			var hr: Array = heights[k]
+			var key := "%d_%d_%s" % [floori(p.x / chunk), floori(p.z / chunk), k]
+			if not buckets.has(key):
+				buckets[key] = []
+			buckets[key].append([p, rf.randf() * TAU, rf.randf_range(hr[0], hr[1])])
+	var proto := {}
+	for k in kinds:
+		if proto.has(k) or not Models.exists(k):
+			continue
+		var h := Models.spawn(self, k, 1.0)
+		var mi: MeshInstance3D = h.find_children("*", "MeshInstance3D", true, false)[0]
+		proto[k] = [mi.mesh, h.global_transform.affine_inverse() * mi.global_transform, mi.get_active_material(0)]
+		h.queue_free()
+	for key in buckets:
+		var ks := String(key)
+		var k := ks.substr(ks.find("_", ks.find("_") + 1) + 1)
+		if not proto.has(k):
+			continue
+		var pr: Array = proto[k]
+		var list: Array = buckets[key]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = pr[0]
+		mm.instance_count = list.size()
+		for i in list.size():
+			var it: Array = list[i]
+			var tr := Transform3D(Basis(Vector3.UP, float(it[1])).scaled(Vector3.ONE * float(it[2])), it[0])
+			mm.set_instance_transform(i, tr * (pr[1] as Transform3D))
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = pr[2]
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		yard_root.add_child(mmi)
 
 
 func _poplar(p: Vector3, rng: RandomNumberGenerator) -> Node3D:
