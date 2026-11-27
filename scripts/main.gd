@@ -3178,6 +3178,7 @@ func _on_quest_done(q: Dictionary) -> void:
 	audio.play("coins", -6.0)
 	if q.get("done", "") != "":
 		hud.toast("+%d ●   %s" % [q["reward"], q["done"]], 3.5)
+		preload("res://scripts/nika_voice.gd").play(String(q["done"]))
 	await get_tree().create_timer(1.6).timeout
 	Game.start_quest()
 

@@ -286,6 +286,8 @@ func show_dialog(who: String, text: String, portrait: Texture2D = null, then := 
 	if dialog.visible:
 		_dialog_queue.append([who, text, portrait, then])
 		return
+	if who == "Ніка":
+		preload("res://scripts/nika_voice.gd").play(text, true)
 	dialog_name.text = who
 	dialog_text.text = text
 	dialog_scroll.scroll_vertical = 0

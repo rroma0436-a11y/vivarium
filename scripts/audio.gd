@@ -14,9 +14,17 @@ var _ui: Array = []
 var _pos: Array = []
 var _t := 0.0
 var _next_owl := 20.0
+static var inst: Node = null
+var _voice: AudioStreamPlayer
+var _voice_q: Array = []
 
 
 func _ready() -> void:
+	inst = self
+	_voice = AudioStreamPlayer.new()
+	_voice.bus = "SFX"
+	add_child(_voice)
+	_voice.finished.connect(_voice_next)
 	for b in ["Music", "Amb", "SFX"]:
 		if AudioServer.get_bus_index(b) < 0:
 			AudioServer.add_bus()
@@ -99,6 +107,22 @@ func play_at(id: String, where: Node3D, vol_db := 0.0, pitch := 1.0) -> void:
 	p.pitch_scale = pitch * randf_range(0.95, 1.05)
 	p.global_position = where.global_position + Vector3(0, 0.4, 0)
 	p.play()
+
+
+func voice(ids: Array) -> void:
+	## Репліка записаним голосом (кілька частин — одна за одною); нова перериває попередню.
+	_voice_q = ids.duplicate()
+	_voice.stop()
+	_voice_next()
+
+
+func _voice_next() -> void:
+	while not _voice_q.is_empty():
+		var s := _stream(String(_voice_q.pop_front()))
+		if s != null:
+			_voice.stream = s
+			_voice.play()
+			return
 
 
 func set_muted(m: bool) -> void:

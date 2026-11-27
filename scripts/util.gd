@@ -513,6 +513,9 @@ static func speak(who: Node3D, id: String, text: String) -> void:
 	var cam := who.get_viewport().get_camera_3d()
 	if cam == null or cam.global_position.distance_to(who.global_position) > VOICE_NEAR:
 		return
+	if id == "girl":
+		preload("res://scripts/nika_voice.gd").play(text, true)      # Ніка — записаним голосом
+		return
 	if _tts.is_empty():
 		_pick_voices()
 		if _tts.is_empty():
