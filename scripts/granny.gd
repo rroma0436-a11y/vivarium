@@ -1527,23 +1527,13 @@ func _board(id: int, cart: Node3D) -> bool:
 	play("idle")
 	_hip_stand = maxf(0.5, hips_world().y - global_position.y)
 	var hs := _hip_stand
-	var side := -PI / 2.0                                  # обличчям до борту (до −x воза)
 	var s0 := {"h": cart.to_local(hips_world()), "yaw": wrapf(rotation.y - cart.rotation.y, -PI, PI), "lean": 0.0, "ik": {}}
-	var hands := {"LeftHand": [CLIMB_GRIP_L, 1.0], "RightHand": [CLIMB_GRIP_R, 1.0]}
-	# 1) хапається за борт
-	var s1 := {"h": Vector3(CLIMB_AT.x - 0.06, hs - 0.02, CLIMB_AT.z), "yaw": side, "lean": 0.35, "ik": hands}
-	# 2) ліву ногу — на колесо
-	var s2 := {"h": Vector3(CLIMB_AT.x - 0.14, hs + 0.1, CLIMB_AT.z + 0.04), "yaw": side, "lean": 0.5,
-		"ik": hands.merged({"LeftFoot": [CLIMB_STEP, 1.0]})}
-	# 3) підтягується: тіло над бортом, права нога — на борт
-	var s3 := {"h": Vector3(0.74, 1.42, CLIMB_AT.z + 0.02), "yaw": side, "lean": 0.6,
-		"ik": hands.merged({"LeftFoot": [CLIMB_STEP, 1.0], "RightFoot": [CLIMB_EDGE, 1.0]})}
-	# 4) перелазить і стає на дно воза
-	var s4 := {"h": Vector3(0.28, CART_FLOOR + hs, -1.2), "yaw": side + 0.3, "lean": 0.2,
-		"ik": {"LeftHand": [CLIMB_GRIP_L, 0.4], "RightHand": [CLIMB_GRIP_R, 0.4],
-			"LeftFoot": [Vector3(0.2, CART_FLOOR + 0.08, -1.05), 1.0], "RightFoot": [Vector3(0.24, CART_FLOOR + 0.08, -1.38), 1.0]}}
-	# 5) стоїть у возі й повертається обличчям уперед
-	var s5 := {"h": Vector3(0.12, CART_FLOOR + hs, -1.15), "yaw": 0.0, "lean": 0.0, "ik": {}}
+	var cs := _climb_stages(hs)
+	var s1: Dictionary = cs[0]
+	var s2: Dictionary = cs[1]
+	var s3: Dictionary = cs[2]
+	var s4: Dictionary = cs[3]
+	var s5: Dictionary = cs[4]
 	for st in [[s0, s1, 0.8], [s1, s2, 0.7], [s2, s3, 1.1], [s3, s4, 1.0], [s4, s5, 0.9]]:
 		if not await _climb_lerp(id, cart, st[0], st[1], float(st[2])):
 			if pose:
@@ -1624,28 +1614,36 @@ func _climb_lerp(id: int, cart: Node3D, a: Dictionary, b: Dictionary, secs: floa
 
 
 func _alight(id: int, cart: Node3D, ahead: bool) -> bool:
-	## Злазить із воза ззаду, бере свій кошик і обходить віз.
+	## Злазить так само, як вилазила, тільки навпаки: встає з сіна, повертається до борту, хапається руками,
+	## перекидає ногу через борт, ставить ногу на маточину колеса й спускається на землю біля заднього колеса.
+	## Потім бере свій кошик із воза й обходить віз.
 	on_tractor = null
 	_boarding = true
-	var back := cart.to_global(Vector3(0, 0, CART_REAR))
-	back.y = 0.0
-	var y1 := cart.rotation.y + PI
-	var h0 := hips_world()
-	var y0 := rotation.y
+	busy = true
+	stop()
+	_face_to = NAN
 	current = ""
 	if ap:
 		ap.speed_scale = 1.0
 	play("idle")
-	var t := 0.0
-	while t < 1.0:
-		await get_tree().process_frame
-		if id != job:
+	var hs := _hip_stand
+	var cs := _climb_stages(hs)
+	var r0 := {"h": cart.to_local(hips_world()), "yaw": 0.0, "lean": 0.0, "ik": {}}
+	var down := {"h": Vector3(CLIMB_AT.x, hs, CLIMB_AT.z), "yaw": -PI / 2.0, "lean": 0.0, "ik": {}}
+	for st in [[r0, cs[4], 1.0], [cs[4], cs[3], 0.9], [cs[3], cs[2], 1.1], [cs[2], cs[1], 0.9], [cs[1], cs[0], 0.7], [cs[0], down, 0.6]]:
+		if not await _climb_lerp(id, cart, st[0], st[1], float(st[2])):
+			if pose:
+				pose.ik = {}
+				pose.lean = 0.0
+			_boarding = false
+			busy = false
 			return false
-		t = minf(1.0, t + get_process_delta_time() / 1.6)
-		var e := t * t * (3.0 - 2.0 * t)
-		rotation.y = lerp_angle(y0, y1, clampf(e * 1.5 - 0.3, 0.0, 1.0))
-		place_hips(h0.lerp(back + Vector3(0, _hip_stand, 0), e) + Vector3(0, sin(t * PI) * 0.3, 0))
-	global_position = back
+	if pose:
+		pose.ik = {}
+		pose.lean = 0.0
+	var foot := cart.to_global(CLIMB_AT)
+	foot.y = 0.0
+	global_position = foot
 	_boarding = false
 	busy = false
 	if trip_basket and is_instance_valid(trip_basket) and trip_basket.get_parent() == cart:
@@ -1659,14 +1657,34 @@ func _alight(id: int, cart: Node3D, ahead: bool) -> bool:
 		busy = false
 	if id != job:
 		return false
-	if ahead:
-		for p in _cart_way(cart, true, false).slice(1):
-			var q: Vector3 = p
-			q.y = 0.0
-			await go(q, false, false)
-			if id != job:
-				return false
+	var away: Array = [cart.to_global(Vector3(1.2, 0, 0.3)), cart.to_global(Vector3(1.5, 0, cart.BEHIND + 1.2))] if ahead \
+		else [cart.to_global(Vector3(1.1, 0, CART_REAR)), cart.to_global(Vector3(0, 0, CART_REAR))]
+	for p in away:
+		var q: Vector3 = p
+		q.y = 0.0
+		await go(q, false, false)
+		if id != job:
+			return false
 	return id == job
+
+
+func _climb_stages(hs: float) -> Array:
+	## Пози вилазіння на віз (у системі воза), по черзі: 1) тримається за борт, 2) ліва нога на колесі,
+	## 3) тіло над бортом, права нога на борті, 4) стоїть на дні воза, 5) стоїть обличчям уперед.
+	## Злазить — ті самі пози у зворотному порядку.
+	var side := -PI / 2.0                                  # обличчям до борту (до −x воза)
+	var hands := {"LeftHand": [CLIMB_GRIP_L, 1.0], "RightHand": [CLIMB_GRIP_R, 1.0]}
+	return [
+		{"h": Vector3(CLIMB_AT.x - 0.06, hs - 0.02, CLIMB_AT.z), "yaw": side, "lean": 0.35, "ik": hands},
+		{"h": Vector3(CLIMB_AT.x - 0.14, hs + 0.1, CLIMB_AT.z + 0.04), "yaw": side, "lean": 0.5,
+			"ik": hands.merged({"LeftFoot": [CLIMB_STEP, 1.0]})},
+		{"h": Vector3(0.74, 1.42, CLIMB_AT.z + 0.02), "yaw": side, "lean": 0.6,
+			"ik": hands.merged({"LeftFoot": [CLIMB_STEP, 1.0], "RightFoot": [CLIMB_EDGE, 1.0]})},
+		{"h": Vector3(0.28, CART_FLOOR + hs, -1.2), "yaw": side + 0.3, "lean": 0.2,
+			"ik": {"LeftHand": [CLIMB_GRIP_L, 0.4], "RightHand": [CLIMB_GRIP_R, 0.4],
+				"LeftFoot": [Vector3(0.2, CART_FLOOR + 0.08, -1.05), 1.0], "RightFoot": [Vector3(0.24, CART_FLOOR + 0.08, -1.38), 1.0]}},
+		{"h": Vector3(0.12, CART_FLOOR + hs, -1.15), "yaw": 0.0, "lean": 0.0, "ik": {}},
+	]
 
 
 func _shop(id: int) -> int:
