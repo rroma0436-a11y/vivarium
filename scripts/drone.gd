@@ -1,12 +1,15 @@
 extends Node3D
-## Дрон-помічник: облітає маленький город по колу, годує курей зерном
-## і поливає соняшники за тином. Уночі відпочиває біля курника.
+## Дрон-помічник: живе на фермі. Удень літає над усім світом і стежить, щоб не було пожеж —
+## побачить вогонь, підлітає й гасить. Зранку годує курей, по обіді поливає город.
+## Уночі сидить на зарядці за 2 м від комбайна.
 
 signal done(what: String)
 
-var center := Vector3.ZERO
-var radius := 2.2
-var height := 2.6
+const HOME := Vector3(-135.2, 0, 40.0)        # комбайн на фермі
+const PATROL_H := 16.0                         # висота облітання світу
+const PATROL_R := 240.0                        # як далеко облітає
+const PATROL_SPEED := 9.0
+var center := HOME
 var model: Node3D
 var drops: CPUParticles3D
 var grain_fx: CPUParticles3D
@@ -18,12 +21,18 @@ var _fed_day := -1
 var _watered_day := -1
 var bubble: Label3D
 var _bubble_left := 0.0
+var foam: CPUParticles3D
+var fires: Array = []
+var _next_fire := 40.0
+var _wp := Vector3.ZERO
+var charger: Node3D
+var charger_pos := Vector3(-139.5, 0, 40.0)
+var _charger_mat: StandardMaterial3D
 
 
-func setup(at: Vector3, sp := {}) -> void:
-	center = at
+func setup(_at: Vector3, sp := {}) -> void:
 	spots = sp
-	position = at + Vector3(radius, height, 0)
+	position = HOME + Vector3(0, PATROL_H, 0)
 	model = Models.spawn(self, "drone", 0.6)
 	if model:
 		model.position.y -= 0.3
@@ -31,6 +40,9 @@ func setup(at: Vector3, sp := {}) -> void:
 	add_child(Util.pick_area("drone", Vector3(0.8, 0.6, 0.8), Vector3.ZERO))
 	drops = _particles(Color(0.55, 0.8, 1.0, 0.8), 0.015, 40)
 	grain_fx = _particles(Color(0.95, 0.8, 0.3, 1.0), 0.02, 30)
+	foam = _particles(Color(0.85, 0.95, 1.0, 0.85), 0.035, 140)
+	foam.lifetime = 1.4
+	foam.spread = 22.0
 	bubble = Util.bubble(load("res://assets/fonts/DejaVuSans-Bold.ttf"), 40)
 	bubble.pixel_size = 0.0032
 	bubble.position = Vector3(0, 0.6, 0)
@@ -149,7 +161,20 @@ func _process(delta: float) -> void:
 		_bubble_left -= delta
 		if _bubble_left <= 0.0:
 			bubble.visible = false
+	if charger == null and _t > 1.0:
+		_make_charger()
+	if _charger_mat:
+		_charger_mat.emission_energy_multiplier = (1.6 + sin(_t * 3.0)) if mode == "rest" else 0.4
+	_flicker_fires()
 	if mode == "task":
+		return
+	if not Game.is_night():
+		_next_fire -= delta
+		if _next_fire <= 0.0:
+			_next_fire = randf_range(45.0, 100.0)
+			_spawn_fire()
+	if not fires.is_empty() and mode != "rest":
+		put_out(_nearest_fire())
 		return
 	# розпорядок: зранку годує курей, по обіді поливає город
 	var h := Game.hour()
@@ -176,12 +201,13 @@ func _process(delta: float) -> void:
 		drops.emitting = true
 	else:
 		drops.emitting = false
-		var a := _t * 0.35
-		var want := center + Vector3(cos(a) * radius, height + sin(_t * 1.7) * 0.12, sin(a) * radius)
-		position = position.lerp(want, 1.0 - exp(-delta * 2.0))
-		rotation.y = lerp_angle(rotation.y, -a, 1.0 - exp(-delta * 3.0))
-		if fmod(_t, 14.0) < delta:
-			_hover = 3.0       # зависає й поливає
+		# облітає світ від точки до точки
+		if _wp == Vector3.ZERO or position.distance_to(_wp) < 3.0:
+			_wp = _rand_point(0.0, PATROL_R) + Vector3(0, PATROL_H, 0)
+		var to := _wp - position
+		position += to.normalized() * minf(PATROL_SPEED * delta, to.length())
+		if Vector2(to.x, to.z).length() > 0.1:
+			rotation.y = lerp_angle(rotation.y, atan2(to.x, to.z), 1.0 - exp(-delta * 2.0))
 
 
 func poke() -> void:
@@ -200,7 +226,8 @@ func fly_to(p: Vector3, speed := 3.0) -> void:
 	while position.distance_to(p) > 0.05:
 		var d := get_process_delta_time()
 		var to := p - position
-		var step := minf(speed * d, to.length())
+		var sp := speed if to.length() < 12.0 else maxf(speed, 22.0)   # далеко — летить швидко
+		var step := minf(sp * d, to.length())
 		position += to.normalized() * step
 		var flat := Vector2(to.x, to.z)
 		if flat.length() > 0.1:
@@ -228,7 +255,8 @@ func feed_hens() -> void:
 	say("Смачного, курочки!")
 	Game.emit_event("hens_fed")
 	done.emit("feed")
-	await fly_to(center + Vector3(radius, height, 0))
+	await fly_to(position + Vector3(0, 4.0, 0), 2.0)
+	_wp = Vector3.ZERO
 	mode = "patrol"
 
 
@@ -257,7 +285,8 @@ func water_field() -> void:
 	say("Город полито!")
 	Game.emit_event("field_watered")
 	done.emit("water")
-	await fly_to(center + Vector3(radius, height, 0), 3.5)
+	await fly_to(position + Vector3(0, 4.0, 0), 2.0)
+	_wp = Vector3.ZERO
 	mode = "patrol"
 
 
@@ -268,22 +297,233 @@ func _play(id: String) -> void:
 
 
 func _land() -> void:
-	## Увечері летить на свій майданчик біля хати й сідає.
+	## Увечері летить на зарядку біля комбайна й сідає.
 	mode = "task"
 	drops.emitting = false
 	grain_fx.emitting = false
-	var pad: Vector3 = spots.get("drone_pad", center)
-	say("Біп… лечу спати.", 2.0)
-	await fly_to(Vector3(pad.x, 3.0, pad.z), 3.0)
-	await fly_to(pad + Vector3(0, 0.32, 0), 0.8)
+	foam.emitting = false
+	if charger == null:
+		_make_charger()
+	say("Біп… лечу на зарядку.", 2.0)
+	await fly_to(Vector3(charger_pos.x, maxf(position.y, 6.0), charger_pos.z), 3.0)
+	await fly_to(charger_pos + Vector3(0, 0.44, 0), 0.8)
 	rotation.y = 0.0
 	mode = "rest"
+	say("Заряджаюсь…", 2.0)
 
 
 func _take_off() -> void:
 	mode = "task"
-	var pad: Vector3 = spots.get("drone_pad", center)
-	await fly_to(Vector3(pad.x, 3.0, pad.z), 1.0)
-	say("Доброго ранку! Біп!", 2.0)
-	await fly_to(center + Vector3(radius, height, 0), 3.0)
+	await fly_to(charger_pos + Vector3(0, 3.0, 0), 1.0)
+	say("Доброго ранку! Лечу стежити, щоб не було пожеж!", 3.0)
+	await fly_to(Vector3(position.x, PATROL_H, position.z), 3.0)
+	_wp = Vector3.ZERO
+	mode = "patrol"
+
+
+# ------------------------------------------------------------------ зарядка біля комбайна
+func _make_charger() -> void:
+	## Зарядна станція за 2 м від борту комбайна.
+	var main = get_node_or_null("/root/Main")
+	var c: Node3D = main.combine if main and "combine" in main and main.combine else null
+	var par := get_parent() as Node3D
+	if c and par:
+		var inv := par.global_transform.affine_inverse()
+		var box := AABB()
+		var first := true
+		for n in c.find_children("*", "MeshInstance3D", true, false):
+			var mi := n as MeshInstance3D
+			var bb: AABB = (inv * mi.global_transform) * mi.get_aabb()
+			box = bb if first else box.merge(bb)
+			first = false
+		if not first:
+			charger_pos = Vector3(box.position.x - 2.0 - 0.55, 0.0, box.get_center().z)
+	charger = Node3D.new()
+	charger.name = "DroneCharger"
+	charger.position = charger_pos
+	var metal := StandardMaterial3D.new()
+	metal.albedo_color = Color(0.25, 0.27, 0.3)
+	metal.metallic = 0.6
+	metal.roughness = 0.4
+	var base := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.55
+	cm.bottom_radius = 0.6
+	cm.height = 0.1
+	cm.material = metal
+	base.mesh = cm
+	base.position.y = 0.05
+	charger.add_child(base)
+	_charger_mat = StandardMaterial3D.new()
+	_charger_mat.albedo_color = Color(0.2, 0.9, 0.4)
+	_charger_mat.emission_enabled = true
+	_charger_mat.emission = Color(0.2, 1.0, 0.45)
+	_charger_mat.emission_energy_multiplier = 0.4
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.36
+	tm.outer_radius = 0.44
+	tm.material = _charger_mat
+	ring.mesh = tm
+	ring.position.y = 0.11
+	charger.add_child(ring)
+	var post := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.12, 0.7, 0.12)
+	bm.material = metal
+	post.mesh = bm
+	post.position = Vector3(-0.72, 0.35, 0)
+	charger.add_child(post)
+	var lamp := MeshInstance3D.new()
+	var lm := SphereMesh.new()
+	lm.radius = 0.08
+	lm.height = 0.16
+	lm.material = _charger_mat
+	lamp.mesh = lm
+	lamp.position = Vector3(-0.72, 0.76, 0)
+	charger.add_child(lamp)
+	if par:
+		par.add_child(charger)
+
+
+# ------------------------------------------------------------------ пожежі
+func _rand_point(rmin: float, rmax: float) -> Vector3:
+	## Випадкова точка у світі (не у воді).
+	var p := Vector3.ZERO
+	for i in 30:
+		var a := randf() * TAU
+		var r := sqrt(randf_range(rmin * rmin / (rmax * rmax), 1.0)) * rmax
+		p = Vector3(cos(a) * r, 0.0, sin(a) * r)
+		if absf(p.z - 102.0) < 9.0:
+			continue                                   # річка
+		if absf(p.x + 70.0) < 23.0 and absf(p.z - 31.0) < 16.0:
+			continue                                   # ставок
+		return p
+	return p
+
+
+func _spawn_fire() -> void:
+	var par := get_parent() as Node3D
+	if par == null:
+		return
+	var p := _rand_point(25.0, PATROL_R)
+	var node := Node3D.new()
+	node.name = "Fire"
+	node.position = p
+	var flames := CPUParticles3D.new()
+	flames.amount = 70
+	flames.lifetime = 0.9
+	flames.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	flames.emission_sphere_radius = 0.9
+	flames.direction = Vector3.UP
+	flames.spread = 18.0
+	flames.initial_velocity_min = 1.2
+	flames.initial_velocity_max = 2.4
+	flames.gravity = Vector3(0, 1.5, 0)
+	flames.scale_amount_min = 0.6
+	flames.scale_amount_max = 1.3
+	var g := Gradient.new()
+	g.set_color(0, Color(1.0, 0.95, 0.4, 1.0))
+	g.set_color(1, Color(0.8, 0.1, 0.0, 0.0))
+	g.add_point(0.45, Color(1.0, 0.45, 0.05, 0.9))
+	flames.color_ramp = g
+	flames.mesh = _quad(0.55, true)
+	flames.position.y = 0.3
+	node.add_child(flames)
+	var smoke := CPUParticles3D.new()
+	smoke.amount = 30
+	smoke.lifetime = 3.5
+	smoke.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	smoke.emission_sphere_radius = 0.8
+	smoke.direction = Vector3.UP
+	smoke.spread = 12.0
+	smoke.initial_velocity_min = 1.5
+	smoke.initial_velocity_max = 2.5
+	smoke.gravity = Vector3(0.3, 0.6, 0)
+	smoke.scale_amount_min = 1.0
+	smoke.scale_amount_max = 2.2
+	var gs := Gradient.new()
+	gs.set_color(0, Color(0.3, 0.3, 0.3, 0.55))
+	gs.set_color(1, Color(0.5, 0.5, 0.5, 0.0))
+	smoke.color_ramp = gs
+	smoke.mesh = _quad(1.2, false)
+	smoke.position.y = 1.2
+	node.add_child(smoke)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.55, 0.2)
+	light.light_energy = 3.0
+	light.omni_range = 10.0
+	light.position.y = 1.2
+	node.add_child(light)
+	par.add_child(node)
+	fires.append({"node": node, "pos": p, "flames": flames, "smoke": smoke, "light": light, "power": 1.0})
+
+
+func _quad(size: float, glow: bool) -> QuadMesh:
+	var q := QuadMesh.new()
+	q.size = Vector2(size, size)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.vertex_color_use_as_albedo = true
+	if glow:
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	q.material = m
+	return q
+
+
+func _flicker_fires() -> void:
+	for fr in fires:
+		var l: OmniLight3D = fr["light"]
+		if is_instance_valid(l):
+			l.light_energy = float(fr["power"]) * randf_range(2.2, 3.6)
+
+
+func _nearest_fire() -> Dictionary:
+	var best: Dictionary = fires[0]
+	for fr in fires:
+		if position.distance_to(fr["pos"]) < position.distance_to(best["pos"]):
+			best = fr
+	return best
+
+
+func _toast(text: String) -> void:
+	var m = get_node_or_null("/root/Main")
+	if m and "hud" in m and m.hud:
+		m.hud.toast(text, 3.0)
+
+
+func put_out(fr: Dictionary) -> void:
+	## Підлітає до пожежі й гасить її водою.
+	mode = "task"
+	drops.emitting = false
+	say("Біп! Бачу пожежу!", 3.0)
+	_toast("Дрон помітив пожежу й летить гасити!")
+	var p: Vector3 = fr["pos"]
+	await fly_to(Vector3(p.x, maxf(position.y, PATROL_H), p.z), 24.0)
+	await fly_to(p + Vector3(0, 4.5, 0), 6.0)
+	var node: Node3D = fr["node"]
+	if is_instance_valid(node):
+		foam.emitting = true
+		_play("sparkle")
+		say("Шшш! Гашу вогонь!", 3.0)
+		var k := 0.0
+		while k < 5.0:
+			var d := get_process_delta_time()
+			k += d
+			fr["power"] = clampf(1.0 - k / 5.0, 0.0, 1.0)
+			node.scale = Vector3.ONE * (0.15 + 0.85 * float(fr["power"]))
+			rotation.y += d * 0.6
+			await get_tree().process_frame
+		foam.emitting = false
+		(fr["flames"] as CPUParticles3D).emitting = false
+		(fr["light"] as OmniLight3D).visible = false
+		(fr["smoke"] as CPUParticles3D).emitting = false
+		get_tree().create_timer(4.0).timeout.connect(node.queue_free)
+		say("Пожежу загашено! Біп!", 3.0)
+		_toast("Дрон загасив пожежу")
+	fires.erase(fr)
+	await fly_to(Vector3(position.x, PATROL_H, position.z), 4.0)
+	_wp = Vector3.ZERO
 	mode = "patrol"
