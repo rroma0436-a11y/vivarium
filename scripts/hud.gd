@@ -312,18 +312,15 @@ var _menu_box: GridContainer
 var _menu_items := {}
 
 const BEEP_ITEMS := [
-	["hint", "Підказка", Color(0.3, 0.72, 0.7)],
-	["scan", "Сканер ферми", Color(0.4, 0.55, 0.85)],
-	["ball", "М'ячик для Біма", Color(0.9, 0.45, 0.35)],
-	["drone_feed", "Дрон: нагодуй курей", Color(0.85, 0.65, 0.25)],
-	["drone_water", "Дрон: полий город", Color(0.3, 0.6, 0.9)],
-	["herd", "Біме, жени курей додому", Color(0.6, 0.5, 0.35)],
+	["bp_talk", "Поговорити", Color(0.3, 0.72, 0.7)],
+	["bp_farm", "Облетіти ферму", Color(0.45, 0.6, 0.35)],
+	["bp_grandpa", "Полетіти до діда", Color(0.75, 0.5, 0.32)],
+	["bp_market", "Полетіти на ринок", Color(0.85, 0.55, 0.2)],
 	["light", "Ліхтарик", Color(0.45, 0.4, 0.7)],
-	["to_plane", "Летимо на літаку", Color(0.85, 0.6, 0.15)],
-	["beep_ctl", "Керувати Beep самому", Color(0.3, 0.55, 0.8)],
-	["home", "Додому, на подвір'я", Color(0.45, 0.6, 0.35)],
+	["scan", "Сканувати", Color(0.4, 0.55, 0.85)],
+	["bp_plane", "Оглянути літак", Color(0.85, 0.6, 0.15)],
+	["bp_forest", "Оглянути ліс", Color(0.3, 0.5, 0.3)],
 ]
-
 
 func _build_beep_menu() -> void:
 	beep_menu = _make_menu("Beep, допоможи!", BEEP_ITEMS, Color(0.3, 0.72, 0.7), _menu_items)
@@ -576,9 +573,8 @@ func show_choice(title: String, items: Array, accent := Color(0.85, 0.55, 0.2)) 
 func show_beep_menu(in_yard: bool, night: bool, lamp_on: bool, grandpa_home := false) -> void:
 	for k in _menu_items:
 		var b: Button = _menu_items[k]
-		b.visible = k in ["hint", "scan"] or in_yard
+		b.visible = k in ["bp_talk", "scan", "light"] or in_yard
 	_menu_items["light"].text = "Ліхтарик: " + ("вимкнути" if lamp_on else "увімкнути")
-	_menu_items["herd"].visible = in_yard and Game.hour() >= 17.0
 	move_child(beep_menu, get_child_count() - 1)
 	beep_menu.visible = true
 	beep_menu.modulate.a = 0.0

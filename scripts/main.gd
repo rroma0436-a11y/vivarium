@@ -141,6 +141,8 @@ func _ready() -> void:
 	if _demo != "":
 		_run_demo()
 	elif _shot == "" and girl:
+		if Game.state["location"] == "yard":
+			beep.position = BEEP_HOME
 		start_girl_control(true)              # Ніка — головна героїня: граємо нею одразу
 
 
@@ -912,6 +914,9 @@ func _on_action(name: String) -> void:
 	if name in ["nk_basket_take", "nk_basket_put", "nk_put", "nk_eat"]:
 		_nika_do(name)
 		return
+	if name.begins_with("bp"):
+		_beep_task(name)
+		return
 	match name:
 		"feed":
 			if Game.state["puppy"]["bowl"] > 0.0:
@@ -964,9 +969,7 @@ func _on_action(name: String) -> void:
 			audio.play("click", -2.0, 1.3)
 			beep.say("Ліхтарик увімкнено!" if on else "Ліхтарик вимкнено.", 2.0)
 		"scan":
-			beep.happy()
-			audio.play_at("magic_bells", beep, -6.0)
-			hud.show_dialog("Beep · сканер", _scan_text(), load("res://assets/ui/beep.png") if ResourceLoader.exists("res://assets/ui/beep.png") else null)
+			_bp_scan()
 		"herd":
 			if _hens_outside():
 				herd_hens()
@@ -3024,6 +3027,7 @@ func _night_step() -> void:
 	## Раз на чверть секунди: кнопка сну, нічні справи (світлячки, зірка, обхід курника).
 	if hud:
 		hud.update_sleep_button(_sleep_mode())
+	_bp_night_home()
 	var t := Game.night_task() if Game.night_active() else {}
 	var goal: String = t.get("goal", "")
 	# світлячки
@@ -4728,3 +4732,503 @@ func _vehicle_do(name: String) -> void:
 				girl.say("Їду в ліс по гриби та ягоди!", 2.0)
 		"vm_off":
 			dismount()
+
+
+# ------------------------------------------------------------------ Beep живе в хаті Ніки: меню доручень
+const BEEP_HOME := Vector3(-21.2, 0, 46.5)          # біля хати Ніки в селі
+var _bp_busy := false
+var _bp_home_day := -1
+var _bp_forest_day := -1
+var _bp_forest_news := ""
+const BP_MSGS := [
+	["Дідусю, я тебе дуже люблю!", "Ох, і я тебе люблю, онучко моя!"],
+	["Дідусю, приходь обідати!", "Добре, скоро прийду! Хай ставлять борщ."],
+	["Дідусю, допоможи мені на фермі!", "Зараз доберуся, почекай трохи, Ніко."],
+	["Дідусю, ходімо в ліс по гриби!", "Гарна думка! Бери кошика."],
+	["Дідусю, ти де?", ""],
+]
+const BP_TALK := [
+	["Як справи, Beep?", "Біп-буп! Чудово! Батарейка повна, пропелери крутяться!"],
+	["Що ти вмієш?", "Облітаю ферму, ношу листи дідусеві, купую на ринку, сканую світ, оглядаю літак і ліс. І світлю ліхтариком!"],
+	["Розкажи жарт!", "Чому робот не боїться темряви? Бо в нього є ліхтарик! Біп-хі-хі!"],
+	["Котра година?", ""],
+	["Що робити далі?", ""],
+	["Ти мій друг?", "Звісно, Ніко! Ти моя найкраща подружка! Біп!"],
+]
+
+
+func _bp_hero() -> Vector3:
+	if girl and girl.visible:
+		return girl.global_position
+	return rig.focus
+
+
+func _bp_portrait() -> Texture2D:
+	return load("res://assets/ui/beep.png") if ResourceLoader.exists("res://assets/ui/beep.png") else null
+
+
+func _bp_go(p: Vector3, raw := false, limit := 90.0) -> bool:
+	## Летить до точки й чекає, поки долетить.
+	var done := [false]
+	if raw:
+		beep.fly_to_raw(p, func(): done[0] = true)
+	else:
+		beep.fly_to(p, func(): done[0] = true)
+	var t := 0.0
+	while not done[0] and t < limit:
+		t += get_process_delta_time()
+		await get_tree().process_frame
+	return done[0]
+
+
+func _bp_wait(secs: float) -> void:
+	await get_tree().create_timer(secs).timeout
+
+
+func _bp_back_report(title: String, text: String) -> void:
+	## Повертається до Ніки, обертається до неї й розповідає.
+	await _bp_go(_bp_hero() + Vector3(1.0, 0, 1.0))
+	beep.face(_bp_hero())
+	beep.happy()
+	audio.play_at("robot_beep", beep, -2.0)
+	beep.say(text.split("\n")[0], 3.5)
+	hud.show_dialog(title, text, _bp_portrait())
+
+
+func _beep_task(name: String) -> void:
+	if name.begins_with("bpt_"):
+		_bp_talk_answer(int(name.trim_prefix("bpt_")))
+		return
+	if name == "bp_talk":
+		beep.face(_bp_hero())
+		if girl and _ctl_girl:
+			_girl_face(beep.global_position)
+		audio.play_at("robot_beep", beep, -2.0)
+		beep.say("Біп! Про що поговоримо, Ніко?", 2.5)
+		var items: Array = []
+		var cols := [Color(0.3, 0.72, 0.7), Color(0.4, 0.55, 0.85), Color(0.85, 0.55, 0.2), Color(0.45, 0.4, 0.7), Color(0.35, 0.6, 0.3), Color(0.85, 0.35, 0.45)]
+		for i in BP_TALK.size():
+			items.append(["bpt_%d" % i, BP_TALK[i][0], cols[i % cols.size()]])
+		hud.show_choice("Поговорити з Beep", items, Color(0.3, 0.72, 0.7))
+		return
+	if _bp_busy:
+		hud.toast("Beep зараз виконує доручення")
+		return
+	if _ctl_beep or beep.piloting:
+		hud.toast("Beep зараз зайнятий")
+		return
+	if Game.state["location"] != "yard":
+		hud.toast("Beep літає з дорученнями лише надворі")
+		return
+	beep.outdoors = true
+	if name.begins_with("bpm_"):
+		_bp_grandpa(int(name.trim_prefix("bpm_")))
+		return
+	if name.begins_with("bpb_"):
+		var ij := name.trim_prefix("bpb_").split("_")
+		_bp_market(ij[0], int(ij[1]))
+		return
+	match name:
+		"bp_farm":
+			_bp_farm()
+		"bp_grandpa":
+			if grandpa == null or not grandpa.visible and not grandpa.at_home:
+				hud.toast("Дідуся зараз не видно")
+				return
+			var items: Array = []
+			for i in BP_MSGS.size():
+				items.append(["bpm_%d" % i, BP_MSGS[i][0], Color(0.75, 0.5, 0.32)])
+			hud.show_choice("Що передати дідусеві?", items, Color(0.75, 0.5, 0.32))
+		"bp_market":
+			var bz = world.outer.bazaar if world.outer else null
+			if bz == null:
+				hud.toast("Ринку ще немає в грі")
+				return
+			var items: Array = []
+			var cols := [Color(0.85, 0.5, 0.2), Color(0.7, 0.4, 0.3), Color(0.55, 0.6, 0.3), Color(0.4, 0.55, 0.75), Color(0.6, 0.45, 0.7)]
+			var n := 0
+			for cat in bz.GOODS:
+				var goods: Array = bz.GOODS[cat]
+				for i in goods.size():
+					items.append(["bpb_%s_%d" % [cat, i], "%s — %d мон." % [goods[i][0], goods[i][1]], cols[n % cols.size()]])
+					n += 1
+			hud.show_choice("Що купити на ринку? У тебе %d мон." % int(Game.state["coins"]), items, Color(0.85, 0.55, 0.2))
+		"bp_plane":
+			_bp_plane()
+		"bp_forest":
+			_bp_forest()
+
+
+func _bp_talk_answer(i: int) -> void:
+	if i < 0 or i >= BP_TALK.size():
+		return
+	var ans: String = BP_TALK[i][1]
+	if i == 3:
+		var h := Game.hour()
+		ans = "Зараз %d:%02d. %s" % [int(h), int(fmod(h, 1.0) * 60.0), "Уже ніч — час спати!" if Game.is_night() else "Ще день — можна гратися!"]
+	elif i == 4:
+		ans = _beep_hint()
+	beep.face(_bp_hero())
+	beep.happy()
+	audio.play_at("robot_beep", beep, -2.0)
+	beep.say(ans, 4.0)
+	hud.show_dialog("Beep", ans, _bp_portrait())
+
+
+# ---- облетіти ферму: заходить крізь двері в корівники й стайні
+func _bp_farm() -> void:
+	_bp_busy = true
+	beep.say("Біп! Лечу оглянути ферму!", 2.5)
+	var o = world.outer
+	var list: Array = []
+	for i in o.COWSHED_POS.size():
+		list.append(["cowshed" + ("" if i == 0 else str(i + 1)), o.COWSHED_POS[i], "Корівник %d" % (i + 1)])
+	for i in o.STABLE_POS.size():
+		list.append(["stable" + ("" if i == 0 else str(i + 1)), o.STABLE_POS[i], "Стайня %d" % (i + 1)])
+	list.shuffle()
+	await _bp_go(Vector3(-165.0, 0, 55.0))
+	var seen: Array = []
+	for b in list.slice(0, 3):
+		var dn: String = String(b[0]) + "_door"
+		if not world.auto_doors.has(dn):
+			continue
+		var ad: Dictionary = world.auto_doors[dn]
+		var door: Vector3 = ad["pos"]
+		var inside: Vector3 = b[1]
+		await _bp_go(door)
+		var t := 0.0
+		while beep.lift > 1.0 and t < 4.0:
+			t += get_process_delta_time()
+			await get_tree().process_frame
+		var r0: float = ad["r"]
+		ad["r"] = 9.0                                 # двері відчинені, поки Beep усередині
+		world.set_door(dn, true, 0.6)
+		await _bp_wait(0.7)
+		await _bp_go(inside, true, 15.0)
+		beep.happy()
+		var n := 0
+		for c in cows:
+			if c.visible and c.global_position.distance_to(inside) < 7.0:
+				n += 1
+		var line := ""
+		if String(b[0]).begins_with("cowshed"):
+			line = "%s: %s" % [b[2], ("корівок усередині — %d, жують сіно" % n) if n > 0 else "корівки на пасовиську, всередині чисто"]
+		else:
+			line = "%s: %s" % [b[2], ["коники відпочивають, сіна вдосталь", "у стайні чисто й тепло", "сідла висять на місці"][randi() % 3]]
+		beep.say(line, 2.5)
+		await _bp_wait(2.5)
+		await _bp_go(door, true, 15.0)
+		ad["r"] = r0
+		seen.append(line)
+	_bp_busy = false
+	await _bp_back_report("Beep · ферма", "Облетів ферму!\n" + "\n".join(seen))
+
+
+# ---- полетіти до дідуся з повідомленням
+func _bp_grandpa(i: int) -> void:
+	if i < 0 or i >= BP_MSGS.size() or grandpa == null:
+		return
+	_bp_busy = true
+	var was: Vector3 = beep.global_position
+	var msg: String = BP_MSGS[i][0]
+	beep.say("Біп! Лечу до дідуся!", 2.0)
+	var reply: String = BP_MSGS[i][1]
+	if reply == "":
+		reply = "Я тут, %s. Скажи Ніці, хай не хвилюється!" % _bp_where(grandpa.global_position) if not grandpa.at_home else "Я вдома, в хаті. Заходь, Ніко!"
+	if grandpa.at_home:
+		await _bp_go((world.spots["door"] as Vector3) + Vector3(0, 0, 1.3))
+		beep.say("Дідусю! Ніка передає: «%s»" % msg, 3.5)
+		await _bp_wait(3.5)
+		beep.say("Дідусь каже з хати: «%s»" % reply, 3.5)
+	else:
+		for k in 3:
+			await _bp_go(grandpa.global_position + Vector3(0.9, 0, 0.9))
+			if beep.global_position.distance_to(grandpa.global_position) < 3.0:
+				break
+		beep.face(grandpa.global_position)
+		beep.say("Дідусю! Ніка передає: «%s»" % msg, 3.5)
+		await _bp_wait(3.5)
+		if grandpa.has_method("face") and grandpa.doing == "":
+			grandpa.face(beep.global_position)
+		grandpa.say(reply, 3.5)
+	await _bp_wait(3.5)
+	await _bp_go(was)
+	beep.say("Дідусь відповів: «%s»" % reply, 4.0)
+	hud.toast("Дідусь: «%s»" % reply, 4.0)
+	_bp_busy = false
+
+
+# ---- полетіти на ринок і купити
+func _bp_market(cat: String, i: int) -> void:
+	var bz = world.outer.bazaar if world.outer else null
+	if bz == null:
+		return
+	var goods: Array = bz.GOODS.get(cat, [])
+	if i < 0 or i >= goods.size():
+		return
+	var g: Array = goods[i]
+	var price := int(g[1])
+	var k := String(g[2])
+	if int(Game.state["coins"]) < price:
+		beep.say("Біп… у тебе лише %d монет, а треба %d." % [int(Game.state["coins"]), price], 3.0)
+		return
+	var sd := {}
+	for s in bz.sellers:
+		if s.get("shop", "") == cat and s.has("front"):
+			sd = s
+			break
+	if sd.is_empty():
+		hud.toast("Цей ларьок зараз зачинений")
+		return
+	_bp_busy = true
+	beep.say("Біп! Лечу на ринок по %s!" % Util.THING_NAMES.get(k, String(g[0]).to_lower()), 2.5)
+	await _bp_go(sd["front"])
+	beep.face(sd["pos"])
+	beep.say("Добрий день! Мені %s, будь ласка." % String(g[0]).to_lower(), 2.5)
+	await _bp_wait(1.5)
+	if int(Game.state["coins"]) < price:
+		bz.seller_say(sd["node"], "Монеток не вистачає, роботику!")
+		_bp_busy = false
+		await _bp_back_report("Beep · ринок", "Не вистачило монет на %s." % String(g[0]).to_lower())
+		return
+	Game.add_coins(-price)
+	audio.play("coins", -8.0)
+	bz.seller_say(sd["node"], ["Тримай, роботику!", "Передай Ніці привіт!", "На здоров'я!"][randi() % 3])
+	bz.seller_give(sd)
+	var it := Util.thing(k)
+	if it:
+		beep.body.add_child(it)
+		it.position = Vector3(0, -0.32, 0.05)
+	await _bp_wait(1.0)
+	beep.say("Дякую! Несу Ніці!", 2.0)
+	await _bp_go(_bp_hero() + Vector3(0.8, 0, 0.8))
+	beep.face(_bp_hero())
+	_bp_busy = false
+	if it == null or not is_instance_valid(it):
+		return
+	it.reparent(world.yard_root)
+	if girl and _ctl_girl and girl.visible:
+		_girl_face(beep.global_position)
+		if k in Util.FOOD and girl.has_basket():
+			await girl.take_item(it, k)
+			var ob: Node3D = girl.drop()
+			if ob:
+				ob.queue_free()
+			girl.item_kind = ""
+			Util.basket_add(girl._bk, GOODS_COLOR.get(k, Color(0.8, 0.6, 0.3)), 0.045)
+		else:
+			await girl.take_item(it, k)
+		girl.say("Дякую, Beep!", 2.0)
+	else:
+		it.global_position = Obstacles.push_out(beep.global_position + Vector3(0, 0.05, 0), 0.25)
+	beep.say("Ось %s! Біп!" % Util.THING_NAMES.get(k, "покупка"), 2.5)
+	audio.play("pop", -8.0, 1.1)
+
+
+# ---- сканувати світ
+func _bp_scan() -> void:
+	beep.hop(14.0 if Game.state["location"] == "yard" else 0.6)
+	beep.say("Біп-біп… сканую округу!", 2.5)
+	audio.play_at("magic_bells", beep, -6.0)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.95
+	tm.outer_radius = 1.0
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.3, 1.0, 0.95, 0.8)
+	tm.material = m
+	ring.mesh = tm
+	beep.add_child(ring)
+	ring.position.y = 1.0
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3.ONE * 40.0, 2.2)
+	tw.tween_property(m, "albedo_color:a", 0.0, 2.2)
+	tw.chain().tween_callback(ring.queue_free)
+	beep.happy()
+	await _bp_wait(2.4)
+	hud.show_dialog("Beep · сканер світу", _bp_world_text() + "\n— Подвір'я —\n" + _scan_text(), _bp_portrait())
+
+
+func _bp_where(p: Vector3) -> String:
+	var o = world.outer
+	var q := Vector2(p.x, p.z)
+	if p.x > -26.0 and p.x < 22.0 and p.z > -20.0 and p.z < 9.0:
+		return "на подвір'ї біля хати"
+	if Rect2(-200.0, 20.0, 75.0, 65.0).has_point(q):
+		return "на фермі"
+	if q.distance_to(Vector2(o.HANGAR.x, o.HANGAR.z)) < 45.0:
+		return "на аеродромі"
+	if o.BAZAAR_AREA.has_point(q):
+		return "на ринку"
+	if q.distance_to(Vector2(o.VILLAGE.x, o.VILLAGE.z)) < 35.0:
+		return "у селі"
+	if q.distance_to(Vector2(o.POND.x, o.POND.z)) < 28.0:
+		return "біля ставка"
+	if Rect2(-200.0, -468.0, 400.0, 146.0).has_point(q):
+		return "у грибному лісі"
+	if q.distance_to(Vector2(o.EAST_FOREST_C.x, o.EAST_FOREST_C.z)) < 45.0:
+		return "у лісі на сході"
+	if o.WHEAT_N.grow(5.0).has_point(q) or o.WHEAT.grow(5.0).has_point(q):
+		return "біля пшеничного поля"
+	if absf(p.z - o.RIVER_Z) < 12.0:
+		return "біля річки"
+	if o.ORCHARD.grow(3.0).has_point(q):
+		return "у садку"
+	return "у полі"
+
+
+func _bp_doing(n) -> String:
+	var d := str(n.get("doing"))
+	return "" if d in ["", "<null>"] else " (справа: %s)" % d
+
+
+func _bp_world_text() -> String:
+	var h := Game.hour()
+	var lines: Array = ["Час: %d:%02d, %s" % [int(h), int(fmod(h, 1.0) * 60.0), "ніч" if Game.is_night() else "день"]]
+	if girl:
+		lines.append("Ніка: %s" % ("вдома, спить" if not girl.visible else _bp_where(girl.global_position)))
+	for e in [[grandpa, "Дідусь Петро"], [granny, "Бабуся Галя"], [kid, "Тарасик"], [gvintyk, "Гвинтик"], [shepherd, "Пастух Іван"], [groom, "Конюх Семен"]]:
+		var n = e[0]
+		if n == null or not is_instance_valid(n):
+			continue
+		if str(n.get("at_home")) == "true" or not n.visible:
+			lines.append("%s: удома" % e[1])
+		else:
+			lines.append("%s: %s%s" % [e[1], _bp_where(n.global_position), _bp_doing(n)])
+	if plane:
+		lines.append("Літак: %s" % ("в ангарі" if plane.in_hangar and plane.state == "rest" else ("у небі" if plane.state == "ride" else _bp_where(plane.global_position))))
+	if combine:
+		lines.append("Комбайн: %s" % _bp_where(combine.global_position))
+	if tractor:
+		lines.append("Трактор: %s" % _bp_where(tractor.global_position))
+	var hz := 0
+	for x in hares:
+		if is_instance_valid(x) and x.visible:
+			hz += 1
+	lines.append("Зайчиків у лісі: %d" % hz)
+	lines.append("Монет у Ніки: %d" % int(Game.state["coins"]))
+	return "\n".join(lines)
+
+
+# ---- оглянути літак в ангарі
+func _bp_plane() -> void:
+	if plane == null:
+		hud.toast("Літака ще немає в грі")
+		return
+	var o = world.outer
+	_bp_busy = true
+	beep.say("Біп! Лечу оглянути літак!", 2.5)
+	if not (plane.in_hangar and plane.state == "rest"):
+		await _bp_go(plane.global_position + Vector3(4.0, 0, 4.0))
+		beep.face(plane.global_position)
+		beep.happy()
+		await _bp_wait(2.0)
+		_bp_busy = false
+		await _bp_back_report("Beep · літак", "Літак не в ангарі — стоїть %s.\nКрила цілі, мотор теплий. Усе гаразд!" % _bp_where(plane.global_position))
+		return
+	var HX: float = o.HANGAR_HX
+	var HZ: float = o.HANGAR_HZ
+	var btn: Vector3 = o.air_world(HX + 0.9, o.HANGAR_BTN_Z)
+	# до кнопки на задній стіні (ззовні) — відчинити ворота
+	await _bp_go(o.air_world(HX + 4.0, HZ + 4.0))
+	await _bp_go(btn, true, 15.0)
+	beep.face(o.air_world(HX, o.HANGAR_BTN_Z))
+	await _bp_wait(0.4)
+	if not o.hangar_open:
+		o.press_hangar_btn(1.0)
+	beep.say("Натискаю кнопку — ворота, відчиняйтесь!", 2.0)
+	await _bp_wait(2.4)
+	# навколо ангара до воріт і всередину
+	for p in [o.air_world(HX + 4.0, HZ + 4.0), o.air_world(-HX - 4.0, HZ + 4.0), o.air_world(-HX - 4.0, 0.0)]:
+		await _bp_go(p, true, 15.0)
+	await _bp_go(o.air_world(-HX + 1.0, 0.0), true, 10.0)
+	beep._lift_want = 1.4
+	for p in [o.air_world(-HX + 1.2, -HZ + 1.2), o.air_world(HX - 1.2, -HZ + 1.2), o.air_world(HX - 1.2, HZ - 1.2), o.air_world(-HX + 1.2, HZ - 1.2)]:
+		await _bp_go(p, true, 10.0)
+		beep._lift_want = 1.4
+		beep.face(plane.global_position)
+		await _bp_wait(0.8)
+	beep.happy()
+	beep.say("Оглядаю: крила, колеса, пропелер…", 2.5)
+	await _bp_wait(2.0)
+	await _bp_go(o.air_world(-HX + 1.0, 0.0), true, 10.0)
+	await _bp_go(o.air_world(-HX - 4.0, 0.0), true, 10.0)
+	# назад до кнопки — зачинити ворота
+	for p in [o.air_world(-HX - 4.0, HZ + 4.0), o.air_world(HX + 4.0, HZ + 4.0)]:
+		await _bp_go(p, true, 15.0)
+	await _bp_go(btn, true, 15.0)
+	beep.face(o.air_world(HX, o.HANGAR_BTN_Z))
+	await _bp_wait(0.4)
+	if o.hangar_open:
+		o.press_hangar_btn(1.0)
+	beep.say("Ворота зачинено!", 2.0)
+	await _bp_wait(1.5)
+	var notes := ["Крила цілі, без жодної подряпини.", "Колеса накачані.", "Пропелер чистий і рівний.", "Кабіна прибрана, ремені на місці."]
+	var extra: String = ["Усе справно — можна летіти!", "Трохи пилу на крилах — я протер. Можна летіти!", "Одне колесо трохи спущене — попроси Гвинтика підкачати."][randi() % 3]
+	_bp_busy = false
+	await _bp_back_report("Beep · літак", "Оглянув літак в ангарі.\n" + "\n".join(notes) + "\n" + extra)
+
+
+# ---- оглянути грибний ліс
+func _bp_forest() -> void:
+	_bp_busy = true
+	var c: Vector3 = world.outer.FOREST_C
+	beep.say("Біп! Лечу в грибний ліс!", 2.5)
+	await _bp_go(c)
+	beep.hop(10.0)
+	beep.say("Сканую ліс…", 2.0)
+	await _bp_wait(2.0)
+	for k in 4:
+		var a := k * TAU / 4.0
+		await _bp_go(c + Vector3(cos(a) * 30.0, 0, sin(a) * 30.0), false, 25.0)
+	var day := int(Game.state["day"])
+	if _bp_forest_day != day:
+		_bp_forest_day = day
+		_bp_forest_news = ["Зараз там ходить злий вовк — сама туди не ходи!", "Бродить дикий кабан — будь обережна!",
+			"Лисичка полює на мишей.", "Там усе спокійно, співають пташки.", "Там усе спокійно, тихо й гарно."][randi() % 5]
+	var lines: Array = ["Оглянув грибний ліс.", _bp_forest_news]
+	var hz := 0
+	for x in hares:
+		if is_instance_valid(x) and x.visible and Rect2(-200.0, -468.0, 400.0, 146.0).has_point(Vector2(x.global_position.x, x.global_position.z)):
+			hz += 1
+	if hz > 0:
+		lines.append("Стрибають зайчики: %d." % hz)
+	if forest:
+		var cnt := {}
+		for gi in forest.goods.size():
+			var gd: Dictionary = forest.goods[gi]
+			if gd.get("taken", false):
+				continue
+			var gp: Vector3 = gd["pos"]
+			if gp.distance_to(c) > 80.0:
+				continue
+			var lb: String = forest.label(gi)
+			cnt[lb] = int(cnt.get(lb, 0)) + 1
+		var keys := cnt.keys()
+		keys.sort_custom(func(x, y): return cnt[x] > cnt[y])
+		var parts: Array = []
+		for kk in keys.slice(0, 4):
+			parts.append("%s — %d" % [kk, cnt[kk]])
+		if not parts.is_empty():
+			lines.append("Росте: " + ", ".join(parts) + ".")
+	for e in [[grandpa, "Дідусь"], [granny, "Бабуся"]]:
+		var n = e[0]
+		if n and n.visible and Rect2(-200.0, -468.0, 400.0, 146.0).has_point(Vector2(n.global_position.x, n.global_position.z)):
+			lines.append("%s зараз у лісі." % e[1])
+	_bp_busy = false
+	await _bp_back_report("Beep · ліс", "\n".join(lines))
+
+
+func _bp_night_home() -> void:
+	## Уночі (коли граємо Нікою) Beep летить додому — у хату Ніки.
+	if not Game.is_night() or not _ctl_girl or _bp_busy or _ctl_beep or beep.piloting or Game.state["location"] != "yard":
+		return
+	var day := int(Game.state["day"])
+	if _bp_home_day == day:
+		return
+	_bp_home_day = day
+	beep.outdoors = true
+	beep.say("Біп… лечу додому, в хату Ніки. На добраніч!", 3.0)
+	beep.fly_to(BEEP_HOME)
