@@ -974,6 +974,8 @@ func _on_action(name: String) -> void:
 				hud.toast("Усі кури вже в курнику")
 		"overview":
 			overview()
+		"sky":
+			rig.look_sky(rig.sky_up() < 10.0)
 		"goodnight":
 			_goodnight()
 		"sleep":
@@ -2181,6 +2183,8 @@ func _girl_follow(delta: float, b, turning: bool) -> void:
 	# оглядатися: у хаті, сараї чи надворі — потягни пальцем, і камера лишиться там, куди повернув
 	var look: bool = rig.looking()
 	rig.pitch_max = 25.0 if inside_any or _acting != "" else -8.0
+	rig.sky_ok = not inside_any
+	hud.show_sky_button(not inside_any and Game.state["location"] != "room", rig.sky_up() > 10.0)
 	if _acting != _cam_act:
 		_cam_act = _acting
 		if _acting != "" and not look:

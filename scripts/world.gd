@@ -17,6 +17,7 @@ var window_mats: Array = []
 var window_quads: Array = []
 var room_windows: Array = []
 var fireflies: CPUParticles3D
+var sky_birds: Node3D               # лелеки й ластівки в небі (sky_birds.gd)
 var grass: MultiMeshInstance3D
 var house: Node3D
 var yard_flower_heads: Array = []   # куди літають бджоли
@@ -50,6 +51,8 @@ func _ready() -> void:
 	_make_portal()
 	_make_fireflies()
 	_register_obstacles()
+	sky_birds = preload("res://scripts/sky_birds.gd").new()
+	add_child(sky_birds)
 	update_time(true)
 
 
@@ -63,6 +66,46 @@ uniform sampler2D night_tex : source_color, filter_linear, repeat_enable;
 uniform float night = 0.0;
 uniform vec3 tint = vec3(1.0);
 uniform float spin = 0.0;
+uniform vec3 sun_dir = vec3(0.0, 0.5, -0.85);
+uniform vec3 moon_dir = vec3(0.0, 0.6, 0.8);
+uniform float moon_phase = 3.14159;
+uniform float sky_time = 0.0;
+
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+	float s = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) {
+		s += a * vnoise(p);
+		p = p * 2.03 + vec2(1.7, 9.2);
+		a *= 0.5;
+	}
+	return s;
+}
+vec3 pano(vec2 uv) {
+	return mix(texture(day_tex, uv).rgb, texture(night_tex, uv).rgb, night);
+}
+float stars(vec3 d, float scale, float dens) {
+	// зорі: у кожній «клітинці» неба — одна зірочка (або жодної), блимає
+	vec3 g = d * scale;
+	vec3 cell = floor(g);
+	float h = hash3(cell);
+	if (h < 1.0 - dens) {
+		return 0.0;
+	}
+	vec3 sp = cell + 0.5 + (vec3(hash3(cell + 1.3), hash3(cell + 7.1), hash3(cell + 3.7)) - 0.5) * 0.6;
+	float dd = length(g - sp);
+	float tw = 0.55 + 0.45 * sin(sky_time * (1.3 + h * 5.0) + h * 40.0);
+	return smoothstep(0.32, 0.0, dd) * tw * (0.4 + 0.6 * (h - (1.0 - dens)) / dens);
+}
+
 void sky() {
 	vec3 d = normalize(EYEDIR);
 	float u = atan(d.x, -d.z) / 6.2831853 + 0.5 + spin;
@@ -70,7 +113,69 @@ void sky() {
 	float v = acos(clamp(d.y, -1.0, 1.0)) / 3.14159265;
 	v = v < 0.5 ? v * 0.94 : 0.47 + (v - 0.5) * 1.06;
 	vec2 uv = vec2(fract(u), clamp(v, 0.002, 0.998));
-	vec3 c = mix(texture(day_tex, uv).rgb, texture(night_tex, uv).rgb, night);
+	vec3 c = pano(uv);
+	// угорі картинка-панорама стягується в точку — там малюємо своє небо (купол), плавно переходячи
+	float up = smoothstep(0.34, 0.6, d.y);
+	float cl = 0.0;
+	if (up > 0.0) {
+		vec3 edge = vec3(0.0);
+		for (int i = -4; i <= 4; i++) {
+			edge += pano(vec2(fract(u + float(i) * 0.045), 0.366));
+		}
+		edge /= 9.0;
+		vec3 zen = mix(vec3(0.3, 0.53, 0.88), vec3(0.016, 0.026, 0.085), night);
+		vec3 dome = mix(mix(edge, zen, 0.35), zen, smoothstep(0.34, 0.75, d.y));
+		c = mix(c, dome, up);
+	}
+	if (!AT_CUBEMAP_PASS) {
+		// хмарки, що повільно пливуть
+		if (up > 0.0) {
+			vec2 cp = d.xz / (d.y + 0.2) * 1.5 + vec2(sky_time * 0.006, sky_time * 0.002);
+			cl = smoothstep(0.44, 0.72, fbm(cp)) * up;
+			vec3 ccol = mix(vec3(1.0, 0.98, 0.96), vec3(0.1, 0.12, 0.2), night);
+			c = mix(c, ccol, cl * 0.8);
+		}
+		vec3 sd = normalize(sun_dir);
+		vec3 md = normalize(moon_dir);
+		float high = smoothstep(0.1, 0.3, d.y);
+		// сонце
+		float sv = (1.0 - night) * smoothstep(-0.02, 0.08, sd.y);
+		if (sv > 0.001) {
+			float s = max(dot(d, sd), 0.0);
+			vec3 scol = mix(vec3(1.0, 0.62, 0.36), vec3(1.0, 0.97, 0.88), smoothstep(0.05, 0.5, sd.y));
+			float disk = smoothstep(0.99925, 0.9994, s) * high;
+			float glow = pow(s, 300.0) * 0.7 + pow(s, 20.0) * 0.16;
+			c += scol * (disk * 2.6 + glow * (0.4 + 0.6 * high)) * sv * (1.0 - cl * 0.7);
+		}
+		// зорі й Чумацький Шлях
+		float nv = night * smoothstep(0.3, 0.45, d.y) * (1.0 - cl);
+		if (nv > 0.01) {
+			float st = stars(d, 170.0, 0.09) + stars(d, 60.0, 0.05) * 1.6;
+			vec3 mwn = normalize(vec3(0.55, 0.25, 0.8));
+			float band = exp(-pow(dot(d, mwn) * 4.0, 2.0));
+			float mw = band * smoothstep(0.35, 0.8, fbm(vec2(d.x + d.z * 0.6, d.y - d.z * 0.4) * 7.0));
+			c += (vec3(0.9, 0.93, 1.0) * st * 1.5 + vec3(0.35, 0.38, 0.55) * mw * 0.35) * nv;
+		}
+		// місяць із фазою
+		float mv = smoothstep(0.3, 0.7, night) * high;
+		float mdot = dot(d, md);
+		if (mv > 0.001 && mdot > 0.98) {
+			vec3 t1 = normalize(cross(md, vec3(0.0, 1.0, 0.0)));
+			vec3 t2 = cross(t1, md);
+			vec2 p = vec2(dot(d, t1), dot(d, t2)) / 0.045;
+			float r2 = dot(p, p);
+			float a = smoothstep(1.0, 0.9, r2);
+			if (a > 0.0) {
+				vec3 n = vec3(p, sqrt(max(1.0 - r2, 0.0)));
+				vec3 L = vec3(sin(moon_phase), 0.0, -cos(moon_phase));
+				float lit = smoothstep(-0.04, 0.1, dot(n, L));
+				float spots = 0.72 + 0.28 * fbm(p * 2.2 + vec2(3.1, 1.7));
+				vec3 mcol = vec3(1.0, 0.98, 0.9) * spots * lit * 1.7 + vec3(0.05, 0.06, 0.1) * (1.0 - lit);
+				c = mix(c, mcol, a * mv * (1.0 - cl * 0.6));
+			}
+			c += vec3(0.5, 0.6, 0.9) * pow(max(mdot, 0.0), 900.0) * 0.35 * mv;
+		}
+	}
 	COLOR = c * tint;
 }
 """
@@ -136,6 +241,15 @@ func update_time(_force := false) -> void:
 	sun.visible = n < 0.97
 	moon.light_energy = 0.32 * n
 	moon.visible = n > 0.03
+	# місяць сходить увечері на сході й до ранку пливе на захід; фаза міняється з кожним днем
+	var km := clampf(wrapf(_sun_h - 19.0, 0.0, 24.0) / 12.0, 0.0, 1.0)
+	moon.rotation_degrees = Vector3(-(sin(km * PI) * 52.0 + 6.0), lerpf(-100.0, 100.0, km), 0)
+	sky_mat.set_shader_parameter("sun_dir", sun.global_transform.basis.z)
+	sky_mat.set_shader_parameter("moon_dir", moon.global_transform.basis.z)
+	sky_mat.set_shader_parameter("moon_phase", PI + sin(float(Game.state.get("day", 0)) * 0.63) * PI * 0.7)
+	sky_mat.set_shader_parameter("sky_time", _t)
+	if sky_birds:
+		sky_birds.visible = n < 0.55 and Game.state["location"] != "room"
 	var amb_day := Color(0.78, 0.8, 0.86)
 	var amb_night := Color(0.22, 0.27, 0.45)
 	env.ambient_light_color = amb_day.lerp(amb_night, n)

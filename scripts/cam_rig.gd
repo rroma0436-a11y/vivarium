@@ -26,6 +26,25 @@ var _dist0 := 0.0
 var _want_dist := -1.0              # куди плавно наближаємо/віддаляємо камеру (-1 — не треба)
 var _want_pitch := 999.0
 var last_drag := -100.0             # коли гравець востаннє крутив камеру пальцем (с) — тоді камера не повертається сама
+## Погляд у небо: потягни пальцем угору — камера опускається за спину й задирає погляд до неба
+## (сонце, хмари, птахи, а вночі — місяць і зорі). Вимикається в хатах (sky_ok = false) і в кімнаті.
+var sky_ok := true
+const SKY_PITCH := 72.0             # наскільки високо можна задерти погляд (градуси над обрієм)
+var _last_focus := Vector3.INF
+
+
+func sky_up() -> float:
+	## Наскільки зараз задерто погляд у небо (0 — звичайна камера).
+	return maxf(pitch - pitch_max, 0.0)
+
+
+func look_sky(on: bool) -> void:
+	## Кнопка «Небо»: плавно задерти погляд угору чи повернути звичайну камеру.
+	if on and sky_ok and inside_box.size == Vector3.ZERO:
+		last_drag = Time.get_ticks_msec() / 1000.0
+		glide_to(dist, 55.0)
+	else:
+		glide_to(dist, minf(pitch_max, -16.0))
 
 
 func _ready() -> void:
@@ -39,6 +58,7 @@ func _ready() -> void:
 func setup(pos: Vector3, y: float, p: float, d: float, dmin: float, dmax: float, ylimit := 400.0, pmin := -60.0, pmax := -8.0) -> void:
 	pitch_min = pmin
 	pitch_max = pmax
+	sky_ok = true
 	focus = pos
 	target = pos
 	yaw = y
@@ -71,6 +91,11 @@ func _process(delta: float) -> void:
 		pitch = lerpf(pitch, _want_pitch, 1.0 - exp(-delta * 2.5))
 		if absf(pitch - _want_pitch) < 0.2:
 			_want_pitch = 999.0
+	# задер погляд у небо, а Ніка пішла — камера сама опускається до звичайної
+	if _last_focus != Vector3.INF and pitch > pitch_max and _touches.is_empty() and _want_pitch > 900.0:
+		if (focus - _last_focus).length() / maxf(delta, 0.001) > 0.8:
+			pitch = lerpf(pitch, pitch_max, 1.0 - exp(-delta * 2.0))
+	_last_focus = focus
 	_apply()
 	_cut_step(delta)
 
@@ -160,9 +185,17 @@ func _unhide_all() -> void:
 
 func _apply() -> void:
 	yaw = clampf(yaw, yaw_center - yaw_limit, yaw_center + yaw_limit)
-	pitch = clampf(pitch, pitch_min, pitch_max)
+	var sky_on := sky_ok and inside_box.size == Vector3.ZERO
+	pitch = clampf(pitch, pitch_min, maxf(SKY_PITCH, pitch_max) if sky_on else pitch_max)
 	dist = clampf(dist, dist_min, dist_max)
-	var b := Basis.from_euler(Vector3(deg_to_rad(pitch), deg_to_rad(yaw), 0))
+	# дивимось у небо: камера опускається за спину (трохи нижче голови), а погляд задирається вгору
+	var orbit := pitch
+	var tilt := 0.0
+	if pitch > pitch_max:
+		var k := clampf((pitch - pitch_max) / maxf(SKY_PITCH - pitch_max, 1.0), 0.0, 1.0)
+		orbit = lerpf(pitch_max, maxf(pitch_max, 12.0), k)
+		tilt = pitch - orbit
+	var b := Basis.from_euler(Vector3(deg_to_rad(orbit), deg_to_rad(yaw), 0))
 	var dir := b * Vector3(0, 0, 1)
 	var d := dist
 	for box in blockers:
@@ -200,7 +233,7 @@ func _apply() -> void:
 		# у кімнаті камера не виходить за стіни: наближаємо, поки не опиниться всередині
 		d = _fit_in_box(dir, d)
 		# тісно (стіна за спиною) — замість лізти впритул до голови камера дивиться більше згори
-		var pe := pitch
+		var pe := orbit
 		while d < 1.7 and pe > -72.0:
 			pe -= 8.0
 			var dir2 := Basis.from_euler(Vector3(deg_to_rad(pe), deg_to_rad(yaw), 0)) * Vector3(0, 0, 1)
@@ -215,6 +248,8 @@ func _apply() -> void:
 				dir = dir2
 	cam.global_position = target + dir * d
 	cam.look_at(target, Vector3.UP)
+	if tilt > 0.01:
+		cam.rotate_object_local(Vector3.RIGHT, deg_to_rad(tilt))
 
 
 func _fit_in_box(dir: Vector3, d: float) -> float:

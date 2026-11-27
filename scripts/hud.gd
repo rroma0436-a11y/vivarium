@@ -609,6 +609,8 @@ func toast(text: String, secs := 2.5) -> void:
 
 
 func _process(delta: float) -> void:
+	if _sky_btn and _sky_btn.visible and Time.get_ticks_msec() / 1000.0 - _sky_seen > 0.3:
+		_sky_btn.visible = false
 	if _big and _big.visible:
 		_big_redraw -= delta
 		if _big_redraw <= 0.0:
@@ -1071,6 +1073,40 @@ func show_overview_button(on: bool) -> void:
 		add_child(_overview_btn)
 		move_child(_overview_btn, bottom_bar.get_index() + 1)
 	_overview_btn.visible = on
+
+
+var _sky_btn: Button
+var _sky_seen := 0.0
+
+
+func show_sky_button(on: bool, looking_up: bool) -> void:
+	## Кнопка «Небо» праворуч: задерти погляд угору (і назад). Викликається щокадру, поки граєш Нікою;
+	## якщо перестали викликати — ховається сама.
+	if _sky_btn == null:
+		_sky_btn = Button.new()
+		_sky_btn.add_theme_font_size_override("font_size", 22)
+		var col := Color(0.3, 0.52, 0.78)
+		_sky_btn.add_theme_stylebox_override("normal", _box(col))
+		_sky_btn.add_theme_stylebox_override("hover", _box(col.lightened(0.08)))
+		_sky_btn.add_theme_stylebox_override("pressed", _box(col.darkened(0.1)))
+		_sky_btn.add_theme_color_override("font_color", Color.WHITE)
+		_sky_btn.anchor_left = 0.0
+		_sky_btn.anchor_right = 0.0
+		_sky_btn.anchor_top = 0.0
+		_sky_btn.anchor_bottom = 0.0
+		_sky_btn.offset_left = 28
+		_sky_btn.offset_right = 168
+		_sky_btn.offset_top = 196
+		_sky_btn.offset_bottom = 254
+		_sky_btn.pressed.connect(func():
+			var au = get_node_or_null("/root/Main/Audio")
+			if au:
+				au.play("click", -6.0)
+			action.emit("sky"))
+		add_child(_sky_btn)
+	_sky_seen = Time.get_ticks_msec() / 1000.0
+	_sky_btn.text = "↓ Назад" if looking_up else "☁ Небо"
+	_sky_btn.visible = on and not big_map_open() and not dialog_open()
 
 
 func show_flight(on: bool) -> void:
