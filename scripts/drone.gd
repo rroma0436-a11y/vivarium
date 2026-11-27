@@ -252,7 +252,6 @@ func feed_hens() -> void:
 			b.go_eat(g, "grain")
 	await get_tree().create_timer(1.5).timeout
 	grain_fx.emitting = false
-	say("Смачного, курочки!")
 	Game.emit_event("hens_fed")
 	done.emit("feed")
 	await fly_to(position + Vector3(0, 4.0, 0), 2.0)

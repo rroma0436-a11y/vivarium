@@ -15,6 +15,7 @@ var actions_box: HBoxContainer
 var dialog: Control
 var dialog_name: Label
 var dialog_text: Label
+var dialog_scroll: ScrollContainer
 var dialog_portrait: TextureRect
 var dialog_ok: Button
 var toast_label: Label
@@ -234,8 +235,10 @@ func _build_dialog() -> void:
 	panel.anchor_right = 0.92
 	panel.anchor_top = 1.0
 	panel.anchor_bottom = 1.0
-	panel.offset_top = -300
-	panel.offset_bottom = -24
+	panel.offset_top = -330
+	panel.offset_bottom = -16
+	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	panel.clip_contents = true
 	panel.add_theme_stylebox_override("panel", _box(Color(1, 0.98, 0.93, 0.98), 30, Color(0.85, 0.7, 0.45), 4, 10))
 	dialog.add_child(panel)
 	var h := HBoxContainer.new()
@@ -256,11 +259,16 @@ func _build_dialog() -> void:
 	dialog_name.add_theme_font_size_override("font_size", 28)
 	dialog_name.add_theme_color_override("font_color", Color(0.5, 0.3, 0.15))
 	v.add_child(dialog_name)
+	dialog_scroll = ScrollContainer.new()
+	dialog_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dialog_scroll.custom_minimum_size = Vector2(0, 90)
+	dialog_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v.add_child(dialog_scroll)
 	dialog_text = Label.new()
 	dialog_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	dialog_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dialog_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	dialog_text.add_theme_font_size_override("font_size", 23)
-	v.add_child(dialog_text)
+	dialog_scroll.add_child(dialog_text)
 	dialog_ok = Button.new()
 	dialog_ok.text = "Добре!"
 	dialog_ok.custom_minimum_size = Vector2(220, 64)
@@ -280,6 +288,7 @@ func show_dialog(who: String, text: String, portrait: Texture2D = null, then := 
 		return
 	dialog_name.text = who
 	dialog_text.text = text
+	dialog_scroll.scroll_vertical = 0
 	dialog_portrait.texture = portrait if portrait != null else load("res://assets/ui/grandpa.png")
 	dialog_portrait.visible = dialog_portrait.texture != null
 	_on_dialog_close = then

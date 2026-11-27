@@ -952,7 +952,6 @@ func _on_action(name: String) -> void:
 			if drone.busy():
 				hud.toast("Дрон зараз зайнятий")
 				return
-			beep.say("Біп! Дроне, нагодуй курей!", 2.5)
 			drone.feed_hens()
 		"drone_water":
 			if drone == null:
@@ -2809,7 +2808,6 @@ func _hens_outside() -> bool:
 func herd_hens() -> void:
 	if puppy.doing == "herd":
 		return
-	beep.say("Біме, жени курочок додому!", 2.5)
 	audio.play_at("puppy_bark", puppy, -2.0)
 	puppy.herd_hens(birds, world.spots["coop_door"])
 
@@ -2851,7 +2849,6 @@ func _scan_text() -> String:
 	var p: Dictionary = s["puppy"]
 	var lines: Array = []
 	lines.append("Бім: ситість %d%%, радість %d%%%s" % [100 - int(p["hunger"]), int(p["joy"]), "" if float(s["water_bowl"]) > 1.0 else ", мисочка з водою порожня"])
-	lines.append("Кури: %s, %s" % ["нагодовані" if float(s["hens_fed"]) > 30.0 else "голодні", "корито з водою" if float(s["trough"]) > 1.0 else "корито порожнє"])
 	var f: Dictionary = s["field"]
 	lines.append("Город: вологість %d%%, соняшники виросли на %d%%" % [int(f["water"]), int(float(f["growth"]) * 100.0)])
 	lines.append("Яєць у кошику: %d" % int(s.get("eggs", 0)))
