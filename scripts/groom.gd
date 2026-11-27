@@ -48,6 +48,12 @@ func _process(delta: float) -> void:
 				bubble.visible = false
 		place_hips(riding.seat_global())
 		rotation.y = riding.rotation.y
+		# тримає віжки обома руками
+		if pose:
+			if riding.has_method("rein_global") and riding.rein_global(true) != Vector3.INF:
+				pose.ik = {"LeftHand": [riding.rein_global(true), 1.0], "RightHand": [riding.rein_global(false), 1.0]}
+			else:
+				pose.ik = {}
 		return
 	super(delta)
 
@@ -329,6 +335,8 @@ func _mount(cart: Node3D, side := 1.0) -> void:
 func _dismount(cart: Node3D, side := 1.0) -> void:
 	## Встає з передка, перелазить через борт, стає на маточину колеса й злазить на землю.
 	riding = null
+	if pose:
+		pose.ik = {}
 	stop()
 	_face_to = NAN
 	busy = true

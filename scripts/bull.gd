@@ -112,6 +112,8 @@ func _process(delta: float) -> void:
 		return
 	if _rein_mi and visible:
 		_reins_draw()
+	if _hrein_mi and _hrein_mi.visible and visible:
+		_hreins_draw()
 	if _bubble_left > 0.0:
 		_bubble_left -= delta
 		if _bubble_left <= 0.0:
@@ -276,6 +278,7 @@ func add_harness() -> void:
 	var src: Node3D = load(Models.DIR % "harness").instantiate()
 	# модель упряжі лежить «на боці» (вісь висоти — −z): повертаємо на 90° навколо x
 	var rot := Basis(Vector3.RIGHT, PI / 2.0)
+	var rmat: Material = null
 	var neck0 := _bone_rest(sk, "neck0")
 	var neck1 := _bone_rest(sk, "neck1")
 	var want := neck0.lerp(neck1, 0.45) + Vector3(0, 0.1, 0) + harness_shift
@@ -284,6 +287,14 @@ func add_harness() -> void:
 	for mi in src.find_children("*", "MeshInstance3D", true, false):
 		var nm := String(mi.name)
 		if nm.begins_with("Shafts"):
+			continue
+		if nm.begins_with("Reins"):
+			# віжки — не жорсткий шматок, а гнучкі ремені (малюємо щокадру: вудило → кільце хомута → руки візника)
+			var rm := (mi as MeshInstance3D).mesh
+			if rm and rm.get_surface_count() > 0:
+				rmat = (mi as MeshInstance3D).get_surface_override_material(0) if (mi as MeshInstance3D).get_surface_override_material_count() > 0 else null
+				if rmat == null:
+					rmat = rm.surface_get_material(0)
 			continue
 		var bone := ""
 		if nm.begins_with("Bridle"):
@@ -313,6 +324,93 @@ func add_harness() -> void:
 		part.visible = mode == "hitched"
 		harness.append(part)
 	src.free()
+	# гнучкі віжки: точки в моделі упряжі (Л, П) — вудило, кільце на хомуті, кінець ременя
+	_hrein_pts.clear()
+	for sx in [1.0, -1.0]:
+		_hrein_pts.append(_bone_marker(sk, "head0", H * Vector3(sx * 0.123, 1.384, -1.39)))
+	for sx in [1.0, -1.0]:
+		_hrein_pts.append(_bone_marker(sk, "neck0", H * Vector3(sx * 0.40, 0.70, -1.43)))
+	for sx in [1.0, -1.0]:
+		_hrein_pts.append(_bone_marker(sk, "", H * Vector3(sx * 0.25, -2.25, -1.15)))
+	if rmat == null:
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.1, 0.045, 0.03)
+		m.roughness = 0.45
+		rmat = m
+	if rmat is BaseMaterial3D:
+		rmat = rmat.duplicate() as Material
+		(rmat as BaseMaterial3D).cull_mode = BaseMaterial3D.CULL_DISABLED
+	_hrein_mat = rmat
+	_hrein_mi = MeshInstance3D.new()
+	_hrein_mi.mesh = ImmediateMesh.new()
+	_hrein_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hrein_mi.extra_cull_margin = 4.0
+	_hrein_mi.visible = mode == "hitched"
+	add_child(_hrein_mi)
+
+
+var rein_to: Node3D = null                                # віз (cart.gd): rein_global(ліва) — де руки візника
+var _hrein_mi: MeshInstance3D
+var _hrein_pts: Array = []                                # вудило (Л, П), кільця хомута (Л, П), кінці ременів (Л, П)
+var _hrein_mat: Material
+
+
+func _bone_marker(sk: Skeleton3D, bone: String, p: Vector3) -> Node3D:
+	## Точка p (у системі коня), що їде разом із кісткою bone ("" — з тулубом).
+	var m := Node3D.new()
+	var bi := sk.find_bone(bone) if bone != "" else -1
+	if bi < 0 and bone != "":
+		for i in sk.get_bone_count():
+			if sk.get_bone_name(i).ends_with(bone):
+				bi = i
+	if bi < 0:
+		m.position = p
+		add_child(m)
+		return m
+	var ba := BoneAttachment3D.new()
+	ba.bone_idx = bi
+	sk.add_child(ba)
+	var B := global_transform.affine_inverse() * sk.global_transform * sk.get_bone_global_rest(bi)
+	m.position = B.affine_inverse() * p
+	ba.add_child(m)
+	return m
+
+
+func _hreins_draw() -> void:
+	var im := _hrein_mi.mesh as ImmediateMesh
+	im.clear_surfaces()
+	if _hrein_pts.size() < 6:
+		return
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _hrein_mat)
+	for s in 2:
+		var bit := to_local((_hrein_pts[s] as Node3D).global_position)
+		var ring := to_local((_hrein_pts[s + 2] as Node3D).global_position)
+		var hand := Vector3.INF
+		if rein_to and is_instance_valid(rein_to) and rein_to.has_method("rein_global"):
+			hand = rein_to.rein_global(s == 0)
+		var end := to_local(hand) if hand != Vector3.INF else to_local((_hrein_pts[s + 4] as Node3D).global_position)
+		_rein_seg(im, bit, ring, 0.03)
+		_rein_seg(im, ring, end, 0.04 + 0.05 * ring.distance_to(end))
+	im.surface_end()
+
+
+func _rein_seg(im: ImmediateMesh, a: Vector3, b: Vector3, sag: float) -> void:
+	## Ремінь від a до b, що м'яко провисає (крива через середину, опущену на sag).
+	var mid := (a + b) * 0.5 + Vector3(0, -sag, 0)
+	var prev := a
+	var n := 12
+	for i in range(1, n + 1):
+		var t := float(i) / n
+		var p := a.lerp(mid, t).lerp(mid.lerp(b, t), t)
+		var side := (p - prev).cross(Vector3.UP)
+		side = side.normalized() * 0.012 if side.length() > 0.0001 else Vector3(0.012, 0, 0)
+		im.surface_add_vertex(prev - side)
+		im.surface_add_vertex(prev + side)
+		im.surface_add_vertex(p + side)
+		im.surface_add_vertex(prev - side)
+		im.surface_add_vertex(p + side)
+		im.surface_add_vertex(p - side)
+		prev = p
 
 
 func _rel(root: Node3D, n: Node3D) -> Transform3D:
@@ -339,6 +437,8 @@ func show_harness(on: bool) -> void:
 		add_harness()
 	for p in harness:
 		(p as Node3D).visible = on
+	if _hrein_mi:
+		_hrein_mi.visible = on
 
 
 func hitch_begin() -> void:

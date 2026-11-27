@@ -986,6 +986,11 @@ func _ride_step() -> void:
 	global_position = t.seat_global() - Vector3(0, HIPS_SIT * _k, 0) - t.global_transform.basis.z * 0.12
 	rotation.y = t.rotation.y
 	model.position = Vector3(0, _base_y, 0)
+	# віз: тримає віжки обома руками
+	if t.has_method("rein_global") and t.rein_global(true) != Vector3.INF:
+		pose.ik = {"LeftHand": [t.rein_global(true), 1.0], "RightHand": [t.rein_global(false), 1.0]}
+	else:
+		pose.ik = {}
 
 
 # ------------------------------------------------------------------ трактор: залазить, сидить за кермом, злазить
@@ -1220,6 +1225,7 @@ func _mount(t: Node3D) -> void:
 
 func _dismount(t: Node3D) -> void:
 	on_tractor = null
+	pose.ik = {}
 	var from := global_position
 	var to: Vector3 = t.to_global(Vector3(-1.35, 0, 0.3))
 	to.y = 0.0
@@ -1282,6 +1288,34 @@ func plow_job() -> void:
 
 func _main() -> Node:
 	return get_node("/root/Main")
+
+
+func _obs() -> Array:
+	## Крім звичайних перешкод — коні й вози (щоб не проходив крізь них).
+	var list: Array = Obstacles.items + extra_obs
+	var m := get_node_or_null("/root/Main")
+	if m == null:
+		return list
+	for c in [m.get("horse_cart"), m.get("garden_cart")]:
+		if c == null or not is_instance_valid(c) or not (c is Node3D) or c == on_tractor or not (c as Node3D).is_visible_in_tree():
+			continue
+		for z in [-1.05, -0.35, 0.35, 1.05]:
+			var p: Vector3 = (c as Node3D).to_global(Vector3(0, 0, z))
+			list.append([Vector2(p.x, p.z), 0.62 if z < 1.0 else 0.45, 1.2])
+	var hs: Array = [m.get("horse"), m.get("garden_horse")]
+	for k in ["extra_horses", "riding_horses"]:
+		var a = m.get(k)
+		if a is Array:
+			hs.append_array(a)
+	for h in hs:
+		if h == null or not is_instance_valid(h) or not (h is Node3D) or not (h as Node3D).is_visible_in_tree():
+			continue
+		var hn: Node3D = h
+		var f := Vector3(sin(hn.rotation.y), 0, cos(hn.rotation.y))
+		for k in [-0.65, 0.0, 0.65]:
+			var p2: Vector3 = hn.global_position + f * k
+			list.append([Vector2(p2.x, p2.z), 0.4, 1.5])
+	return list
 
 
 func tractor_drive_job() -> void:
@@ -2549,6 +2583,7 @@ func _horse_go(id: int, cart: Node3D, p: Vector3, v: float, reach: float, steer:
 		var sp := minf(v, maxf(0.5, to.length() * 1.2))
 		cart.speed = move_toward(cart.speed, sp, dt * 1.5)
 		h.hitch_move(hd, cart.speed, dt)
+		Vehicles.avoid_people(h)
 		if steer:
 			# не в'їжджаємо в дерева, хати, паркани, ставок: виштовхуємо точку між конем і возом
 			var mid: Vector3 = h.global_position - Vector3(sin(h.rotation.y), 0, cos(h.rotation.y)) * 0.9

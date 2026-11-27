@@ -437,6 +437,14 @@ func _drive_to(p: Vector3, v: float, reach := 0.7) -> void:
 		speed = move_toward(speed, vv, dt * 1.8)
 		rotation.y += clampf(diff, -1.0, 1.0) * dt * speed / 1.9 * 1.6
 		global_position += Vector3(sin(rotation.y), 0, cos(rotation.y)) * speed * dt
+		# не їде крізь людей і тварин
+		var ppl := Vehicles.people()
+		if not ppl.is_empty():
+			var gp := global_position
+			var g2 := Obstacles.push_out(gp, 1.3, 0.0, ppl)
+			if g2.distance_to(gp) > 0.001:
+				global_position = Vector3(g2.x, gp.y, g2.z)
+				speed = move_toward(speed, 0.4, dt * 4.0)
 		await get_tree().process_frame
 
 

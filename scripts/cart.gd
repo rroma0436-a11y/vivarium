@@ -24,6 +24,7 @@ var _rz := 0.0                           # задня вісь, z у систе�
 const MAX_STEER := 1.1                   # найбільший кут передка відносно воза
 var harness_parts: Array = []            # упряж (хомут із дугою) лежить на возі, поки кінь не запряжений
 const HARNESS_AT := Vector3(0, 0.86, -0.35)
+const REIN_HANDS := [Vector3(0.15, 1.0, 0.66), Vector3(-0.15, 1.0, 0.66)]   # руки візника з віжками (Л, П), у системі воза
 
 
 func setup(at: Vector3, yaw: float) -> void:
@@ -131,7 +132,18 @@ func take_harness() -> Node3D:
 func harness_on() -> void:
 	## Упряж — на коня.
 	if horse and is_instance_valid(horse):
+		horse.rein_to = self
 		horse.show_harness(true)
+
+
+func rein_global(left: bool) -> Vector3:
+	## Де руки візника тримають віжки (поки віз запряжений); інакше — INF.
+	if not hitched:
+		return Vector3.INF
+	var p := to_global(REIN_HANDS[0 if left else 1])
+	if model:
+		p.y += model.position.y
+	return p
 
 
 func harness_now() -> void:
@@ -284,6 +296,7 @@ func _horse_to(p: Vector3, v: float, reach: float, steer_around := true) -> void
 		var sp := minf(v, maxf(0.5, d * 1.2))
 		speed = move_toward(speed, sp, dt * 1.5)
 		h.hitch_move(hd, speed, dt)
+		Vehicles.avoid_people(h)
 		await get_tree().process_frame
 	speed = 0.0
 

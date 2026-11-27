@@ -98,9 +98,56 @@ static func route(from: Vector3, to: Vector3) -> Array:
 	return pts
 
 
+static func people() -> Array:
+	## Персонажі й тварини (кола-перешкоди [центр, радіус, висота]) — транспорт їх об'їжджає, а не їде крізь них.
+	## Хто сидить на возі чи тракторі (або йде за плугом) і запряжений кінь — не рахуються.
+	var list: Array = []
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null or tree.root == null:
+		return list
+	var m := tree.root.get_node_or_null("Main")
+	if m == null:
+		return list
+	var who: Array = []
+	for k in ["girl", "tea_boy", "market_bot", "kid", "gvintyk", "puppy", "grandpa", "granny", "groom", "shepherd"]:
+		who.append([m.get(k), 0.35])
+	for k in ["horse", "garden_horse"]:
+		who.append([m.get(k), 0.9])
+	for k in ["cows", "extra_horses", "riding_horses"]:
+		var a = m.get(k)
+		if a is Array:
+			for n in a:
+				who.append([n, 0.9])
+	for e in who:
+		var w = e[0]
+		if w == null or not is_instance_valid(w) or not (w is Node3D):
+			continue
+		var n: Node3D = w
+		if not n.is_visible_in_tree():
+			continue
+		if n.get("on_tractor") or n.get("riding") or n.get("behind_plow") or str(n.get("mode")) == "hitched":
+			continue
+		var p := n.global_position
+		list.append([Vector2(p.x, p.z), float(e[1]), 1.5])
+	return list
+
+
+static func avoid_people(h: Node3D) -> void:
+	## Кінь (із возом) не проходить крізь людей і тварин: якщо хтось уже впритул — м'яко відходить убік.
+	var ppl := people()
+	if ppl.is_empty():
+		return
+	var hp := h.global_position
+	var h2 := Obstacles.push_out(hp, 0.7, 0.0, ppl)
+	h.global_position += Vector3(h2.x - hp.x, 0, h2.z - hp.z)
+
+
 static func steer_target(pos: Vector3, target: Vector3, r: float) -> Vector3:
-	## Проміжна точка в обхід хат, дерев і подвір'я.
+	## Проміжна точка в обхід хат, дерев, подвір'я, а також людей і тварин.
 	var t := Obstacles.steer(pos, target, r, 0.4, Obstacles.all)
+	var ppl := people()
+	if not ppl.is_empty():
+		t = Obstacles.steer(pos, t, r, 0.4, ppl)
 	# подвір'я — обходимо кутом
 	var y := YARD.grow(r + 1.5)
 	var mid := (pos + t) * 0.5
