@@ -2795,8 +2795,10 @@ func trip_job(kind: String) -> void:
 
 # ---------------- з бабусею (її меню): запрягти, під'їхати до воріт, бабуся сідає — і на ринок чи в ліс
 const GATE_LOOP := [Vector3(-10.0, 0, 10.6), Vector3(-7.0, 0, 13.6), Vector3(-1.5, 0, 14.5)]     # від воріт — розворот на дорозі
-const GATE_BACK := [Vector3(-10.0, 0, 10.6), Vector3(-7.0, 0, 13.6), Vector3(-1.5, 0, 13.0), Vector3(2.5, 0, 8.6),
-	Vector3(10.5, 0, 6.0), Vector3(22.0, 0, 5.8)]                                                  # від воріт — на схід, повз садок
+# від воріт — розворот і сільською дорогою на південь, в обхід садка (повз садок біля тину віз застрягає)
+const GATE_BACK := [Vector3(-10.0, 0, 10.6), Vector3(-7.0, 0, 13.6), Vector3(-1.5, 0, 14.5), Vector3(2.0, 0, 20.0),
+	Vector3(3.0, 0, 31.0), Vector3(12.0, 0, 32.5), Vector3(25.5, 0, 30.5)]
+const AROUND_ORCHARD := [Vector3(26.8, 0, 22.0), Vector3(26.8, 0, 13.0), Vector3(30.0, 0, 5.5)]   # далі — за садком на схід
 const MUSHROOMS := ["borovyk", "lysychky", "pidberezovyk", "openky", "syroizhky", "pidosykovyk", "maslyuk", "ryzhyk"]
 var granny_ride := ""          # етап поїздки з бабусею: prep, board, ride, there, back, ride_home, home ("" — немає)
 
@@ -2880,7 +2882,7 @@ func granny_trip(kind: String) -> void:
 			return
 	else:
 		say("Гайда в ліс!", 2.0)
-		if not await _drive(id, cart, GATE_BACK + [Vector3(30.0, 0, 5.5), Vector3(71.0, 0, 5.0), Vector3(100.0, 0, 5.5), Vector3(110.0, 0, 1.5)]):
+		if not await _drive(id, cart, GATE_BACK + AROUND_ORCHARD + [Vector3(71.0, 0, 5.0), Vector3(100.0, 0, 5.5), Vector3(110.0, 0, 1.5)]):
 			return
 		granny_ride = "there"
 		if not await _get_off(id, cart):

@@ -389,6 +389,9 @@ func _make_menu(title: String, items: Array, accent: Color, store: Dictionary, c
 		b.add_theme_color_override("font_color", Color.WHITE)
 		b.add_theme_color_override("font_hover_color", Color.WHITE)
 		b.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 0.85))
+		# неактивна кнопка («Вже доїть корову…») — блідіша, але з написом
+		b.add_theme_stylebox_override("disabled", _box(col.lerp(Color(0.85, 0.85, 0.85), 0.45)))
+		b.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.9))
 		var key: String = it[0]
 		b.pressed.connect(func():
 			menu.visible = false

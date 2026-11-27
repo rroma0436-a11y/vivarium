@@ -51,6 +51,7 @@ var _hip_stand := 0.9
 var trip_done := false                # набрала в лісі чи накупила на ринку — дід може повертати
 var trip_basket: Node3D
 var _porch_basket: Node3D
+var _bale: Node3D                     # в'язка сіна на возі, на якій бабуся сидить
 var _home_way: Array = []             # дорога від воріт туди, де бабуся зараз (назад — у зворотному порядку)
 
 const GRANNY_BOUNDS := Rect2(-60.0, -130.0, 105.0, 164.0)
@@ -89,8 +90,10 @@ const OVEN_STAND := Vector3(2.62, 0, -0.42)
 const BED_SIDE := Vector3(0.24, 0, -1.55)        # біля ліжка, з лівого боку
 const LIE_ROOT := Vector3(1.1, 1.04, -0.98)      # лежить: ноги тут, голова — до подушки (−z)
 # віз
-const GR_SEAT := Vector3(0.42, 0.78, 0.3)        # де сидить (стегна) — поруч із дідом, у системі воза
-const GR_BASKET := Vector3(0.3, 0.56, -0.95)     # її кошик на возі
+const GR_SEAT := Vector3(0.0, 0.95, -1.05)       # де сидить (стегна) — ззаду воза на в'язці сіна, у системі воза
+const GR_BASKET := Vector3(-0.3, 0.57, -0.62)    # її кошик на возі (під ногами, ліворуч)
+const GR_BALE := Vector3(0.0, 0.72, -1.12)       # в'язка сіна під бабусею
+const CART_REAR := -2.05                         # z за возом, звідки вилазить і куди злазить
 const GATE_WAIT := Vector3(-1.5, 0, 7.8)         # чекає на віз біля воріт
 const TRIP_BOUNDS := Rect2(-235.0, -140.0, 385.0, 350.0)
 const MARKET_WALK := [Vector3(1.8, 0, 12.5), Vector3(2.0, 0, 20.0), Vector3(3.0, 0, 31.0), Vector3(5.5, 0, 50.0), Vector3(5.5, 0, 68.0),
@@ -694,12 +697,13 @@ func _reset_tools() -> void:
 		on_tractor = null
 		_boarding = false
 		if c and is_instance_valid(c):
-			global_position = c.to_global(Vector3(1.05, 0, GR_SEAT.z))
+			global_position = c.to_global(Vector3(0, 0, CART_REAR))
 		global_position.y = 0.0
 		current = ""
 	if trip_basket and is_instance_valid(trip_basket) and held != trip_basket:
 		trip_basket.queue_free()
 	trip_basket = null
+	_drop_bale()
 	# у хаті: ложку сховати, пару вимкнути, баняк і деко — на столик
 	if _spoon:
 		_spoon.visible = false
@@ -1365,6 +1369,7 @@ func trip_job(kind: String) -> void:
 		say("Ой, а воза ж немає…", 2.5)
 		end_job(id)
 		return
+	_put_bale(main.garden_cart)
 	if not await _ready_in_yard(id):
 		return
 	say("Поїду з дідом на ринок!" if kind == "market" else "Поїдемо з дідом у ліс по ягоди!", 2.5)
@@ -1450,23 +1455,45 @@ func _wait_gp(id: int, stages: Array) -> bool:
 	return false
 
 
-func _cart_round(cart: Node3D, ahead: bool) -> Vector3:
-	## Праворуч від воза — спереду (повз коня) чи ззаду.
-	return cart.to_global(Vector3(1.5, 0, cart.BEHIND + 1.2)) if ahead else cart.to_global(Vector3(1.1, 0, -2.1))
+func _cart_way(cart: Node3D, from_front: bool, to_rear: bool) -> Array:
+	## Обхід воза праворуч: спереду (повз коня) — уздовж борту — ззаду.
+	var pts: Array = [cart.to_global(Vector3(1.5, 0, cart.BEHIND + 1.2)), cart.to_global(Vector3(1.2, 0, 0.3)),
+		cart.to_global(Vector3(1.1, 0, CART_REAR)), cart.to_global(Vector3(0, 0, CART_REAR))]
+	if not from_front:
+		pts = pts.slice(2)
+	if not to_rear:
+		pts.reverse()
+	return pts
+
+
+func _put_bale(cart: Node3D) -> void:
+	## Дід підстелив на возі в'язку сіна — бабусі сидіти ззаду.
+	_drop_bale()
+	_bale = Node3D.new()
+	_bale.name = "GrannyBale"
+	cart.add_child(_bale)
+	_bale.position = GR_BALE
+	var hay := Util.mat(Color(0.9, 0.76, 0.36), 1.0)
+	_bale.add_child(Util.sphere(0.3, hay, Vector3.ZERO, Vector3(1.25, 0.55, 0.9)))
+	_bale.add_child(Util.sphere(0.2, Util.mat(Color(0.82, 0.68, 0.3), 1.0), Vector3(0.12, 0.08, 0.05), Vector3(1.2, 0.5, 1.0)))
+
+
+func _drop_bale() -> void:
+	if _bale and is_instance_valid(_bale):
+		_bale.queue_free()
+	_bale = null
 
 
 func _board(id: int, cart: Node3D) -> bool:
-	## Підходить до воза праворуч, ставить кошик на віз і вилазить на сидіння поруч із дідом.
+	## Обходить віз, ставить кошик на віз і вилазить ззаду на в'язку сіна (обличчям уперед, за дідом).
 	var ahead: bool = cart.to_local(global_position).z > 0.0
-	await go(_cart_round(cart, ahead))
-	if id != job:
-		return false
-	var side := cart.to_global(Vector3(1.05, 0, GR_SEAT.z))
-	side.y = 0.0
-	await go(side, false, false)
-	if id != job:
-		return false
-	face(cart.to_global(Vector3(0, 0, GR_SEAT.z)))
+	for p in _cart_way(cart, ahead, true):
+		var q: Vector3 = p
+		q.y = 0.0
+		await go(q, false, false)
+		if id != job:
+			return false
+	face(cart.to_global(Vector3(0, 0, 0)))
 	await wait(0.4)
 	if id != job:
 		return false
@@ -1486,22 +1513,25 @@ func _board(id: int, cart: Node3D) -> bool:
 	var h0 := hips_world()
 	var y0 := rotation.y
 	var n: String = anims.get("sit", "")
-	if ap and n != "":
-		current = "sit"
-		ap.speed_scale = 1.0
-		ap.play(n, 0.5)
-		ap.seek(0.0, true)
 	var t := 0.0
 	var paused := false
+	var sat := false
 	while t < 1.0:
 		await get_tree().process_frame
 		if id != job:
 			return false
-		t = minf(1.0, t + get_process_delta_time() / 1.4)
+		t = minf(1.0, t + get_process_delta_time() / 1.8)
 		var e := t * t * (3.0 - 2.0 * t)
-		rotation.y = lerp_angle(y0, cart.rotation.y, e)
-		place_hips(h0.lerp(cart.to_global(GR_SEAT), e) + Vector3(0, sin(t * PI) * 0.3, 0))
-		if t > 0.45 and not paused and ap and current == "sit":
+		rotation.y = lerp_angle(y0, cart.rotation.y, minf(1.0, e * 2.0))
+		# спершу — угору через задній борт, потім — сідає
+		place_hips(h0.lerp(cart.to_global(GR_SEAT), e) + Vector3(0, sin(t * PI) * 0.35, 0))
+		if t > 0.4 and not sat and ap and n != "":
+			sat = true
+			current = "sit"
+			ap.speed_scale = 1.0
+			ap.play(n, 0.5)
+			ap.seek(0.0, true)
+		if t > 0.75 and sat and not paused and current == "sit":
 			paused = true
 			ap.pause()                   # перший кадр «сидить» — і тримаємо
 	_boarding = false
@@ -1510,13 +1540,12 @@ func _board(id: int, cart: Node3D) -> bool:
 
 
 func _alight(id: int, cart: Node3D, ahead: bool) -> bool:
-	## Злазить із воза праворуч і бере свій кошик.
+	## Злазить із воза ззаду, бере свій кошик і обходить віз.
 	on_tractor = null
 	_boarding = true
-	var side := cart.to_global(Vector3(1.05, 0, GR_SEAT.z))
-	side.y = 0.0
-	var out := cart.global_transform.basis.x
-	var y1 := atan2(out.x, out.z)
+	var back := cart.to_global(Vector3(0, 0, CART_REAR))
+	back.y = 0.0
+	var y1 := cart.rotation.y + PI
 	var h0 := hips_world()
 	var y0 := rotation.y
 	current = ""
@@ -1528,11 +1557,11 @@ func _alight(id: int, cart: Node3D, ahead: bool) -> bool:
 		await get_tree().process_frame
 		if id != job:
 			return false
-		t = minf(1.0, t + get_process_delta_time() / 1.3)
+		t = minf(1.0, t + get_process_delta_time() / 1.6)
 		var e := t * t * (3.0 - 2.0 * t)
-		rotation.y = lerp_angle(y0, y1, e)
-		place_hips(h0.lerp(side + Vector3(0, _hip_stand, 0), e) + Vector3(0, sin(t * PI) * 0.2, 0))
-	global_position = side
+		rotation.y = lerp_angle(y0, y1, clampf(e * 1.5 - 0.3, 0.0, 1.0))
+		place_hips(h0.lerp(back + Vector3(0, _hip_stand, 0), e) + Vector3(0, sin(t * PI) * 0.3, 0))
+	global_position = back
 	_boarding = false
 	busy = false
 	if trip_basket and is_instance_valid(trip_basket) and trip_basket.get_parent() == cart:
@@ -1546,7 +1575,13 @@ func _alight(id: int, cart: Node3D, ahead: bool) -> bool:
 		busy = false
 	if id != job:
 		return false
-	await go(_cart_round(cart, ahead))
+	if ahead:
+		for p in _cart_way(cart, true, false).slice(1):
+			var q: Vector3 = p
+			q.y = 0.0
+			await go(q, false, false)
+			if id != job:
+				return false
 	return id == job
 
 
@@ -1628,6 +1663,7 @@ func _trip_fail(id: int) -> void:
 
 func _trip_end(id: int, got: int) -> void:
 	## Додому: у двір, кошик із гостинцями — на ґанок.
+	_drop_bale()
 	if outside:
 		if not await _come_in(id):
 			return
