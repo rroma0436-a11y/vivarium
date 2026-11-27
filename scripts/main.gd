@@ -459,7 +459,7 @@ func _watch_doors(dt: float) -> void:
 	var mv: Array = []
 	if Game.state["location"] == "yard" and not beep.piloting and beep.lift < 3.0:
 		mv.append(beep.global_position)
-	for w in [grandpa, girl if not _ctl_girl else null, kid, gvintyk, puppy, groom, shepherd]:
+	for w in [grandpa, granny, girl if not _ctl_girl else null, kid, gvintyk, puppy, groom, shepherd]:
 		if w and is_instance_valid(w) and w.visible and (w as Node3D).global_position.z > -500.0:
 			mv.append((w as Node3D).global_position)
 	for g in geese:
@@ -890,11 +890,11 @@ func _beep_hint() -> String:
 		"meet_granny":
 			return "Бабуся Галя — у червоній хустці. Торкнись її!"
 		"granny_milk":
-			return "Торкнись бабусі → «Подоїти корову»."
+			return "Торкнись бабусі → «Піду подою корову»."
 		"granny_garden":
 			return "Торкнись бабусі → «Прополоти город»."
 		"granny_pies":
-			return "Торкнись бабусі → «Спекти пиріжки»."
+			return "Торкнись бабусі → «Приготую їсти»."
 	return "Біп!"
 
 
@@ -1136,25 +1136,37 @@ func _on_action(name: String) -> void:
 			_follow_later(grandpa)
 		"gr_talk":
 			_granny_talk()
-		"gr_milk", "gr_hens", "gr_garden", "gr_borscht", "gr_pies":
+		"gr_milk", "gr_hens", "gr_cook", "gr_garden", "gr_market", "gr_rest", "gr_forest":
 			if granny == null:
 				hud.toast("Немає моделі бабусі — завантаж на GitHub файл models_13.zip", 5.0)
 				return
-			if Game.is_night() or not granny.on_time():
+			if name != "gr_rest" and (Game.is_night() or not granny.on_time()):
 				granny.say("Ніч надворі, онучку. Завтра зранку!", 2.5)
 				return
+			if name in ["gr_market", "gr_forest"]:
+				if garden_cart == null or garden_horse == null or grandpa == null:
+					hud.toast("Немає моделі коня чи воза — завантаж на GitHub файл models_11.zip", 5.0)
+					return
+				if grandpa.doing == "sleep" or grandpa.lying:
+					hud.toast("Дідусь спить — поїдете, як прокинеться", 3.0)
+					return
 			granny.cancel_job()
 			match name:
 				"gr_milk":
 					granny.milk_job()
 				"gr_hens":
 					granny.hens_job()
+				"gr_cook":
+					granny.cook_job()
 				"gr_garden":
 					granny.garden_job()
-				"gr_borscht":
-					granny.borscht_job()
-				"gr_pies":
-					granny.pies_job()
+				"gr_rest":
+					granny.rest_job()
+				"gr_market", "gr_forest":
+					var k := "market" if name == "gr_market" else "forest"
+					grandpa.cancel_job()
+					grandpa.granny_trip(k)
+					granny.trip_job(k)
 			_follow_later(granny)
 		"sound":
 			audio.set_muted(not audio.is_muted())
@@ -1222,9 +1234,9 @@ func _map_markers() -> Array:
 			m.append(["Дідусь", grandpa.global_position, Color(0.45, 0.35, 0.25)])
 	m.append(["Бім", puppy.global_position, Color(0.9, 0.55, 0.15)])
 	if granny:
-		if granny.visible:
+		if granny.visible and not granny.in_room:
 			m.append(["Бабуся Галя" + (" (доїть корову)" if granny.doing == "milk" else ""), granny.global_position, Color(0.85, 0.2, 0.2)])
-		elif granny.in_house:
+		elif granny.in_house or granny.in_room:
 			m.append(["Бабуся (у хаті)", world.HOUSE_POS, Color(0.85, 0.2, 0.2)])
 	for n in [kid, gvintyk]:
 		if n and n.visible:

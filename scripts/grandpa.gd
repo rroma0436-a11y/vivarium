@@ -2716,6 +2716,7 @@ func _trip_setup(id: int) -> bool:
 func _trip_abort() -> void:
 	## Поїздку перервали: віз і кінь — під садок, речі — на місце, дідусь — на подвір'я.
 	_trip = ""
+	granny_ride = ""
 	_rod_hand = false
 	_rod_lift = 0.0
 	if _line:
@@ -2790,6 +2791,160 @@ func trip_job(kind: String) -> void:
 			await _sow_trip(id, m, cart, h)
 		"farm":
 			await _farm_trip(id, m, cart, h)
+
+
+# ---------------- з бабусею (її меню): запрягти, під'їхати до воріт, бабуся сідає — і на ринок чи в ліс
+const GATE_LOOP := [Vector3(-10.0, 0, 10.6), Vector3(-7.0, 0, 13.6), Vector3(-1.5, 0, 14.5)]     # від воріт — розворот на дорозі
+const GATE_BACK := [Vector3(-10.0, 0, 10.6), Vector3(-7.0, 0, 13.6), Vector3(-1.5, 0, 13.0), Vector3(2.5, 0, 8.6),
+	Vector3(10.5, 0, 6.0), Vector3(22.0, 0, 5.8)]                                                  # від воріт — на схід, повз садок
+const MUSHROOMS := ["borovyk", "lysychky", "pidberezovyk", "openky", "syroizhky", "pidosykovyk", "maslyuk", "ryzhyk"]
+var granny_ride := ""          # етап поїздки з бабусею: prep, board, ride, there, back, ride_home, home ("" — немає)
+
+
+func granny_trip(kind: String) -> void:
+	var m := _main()
+	var cart: Node3D = m.garden_cart
+	var h: Node3D = m.garden_horse
+	var g = m.granny
+	if cart == null or h == null or g == null:
+		say("Ех, коня чи воза в нас нема…", 2.5)
+		return
+	var id := begin_job("trip")
+	_trip = "granny"
+	granny_ride = "prep"
+	if not await _trip_setup(id):
+		return
+	say("Зараз запряжу коня — і поїдемо, бабо!", 2.5)
+	var basket: Node3D = null
+	if kind == "forest":
+		basket = Util.basket()
+		basket.set_meta("to", "porch")
+		_hold_carry([basket])
+	if not await _go_outside(id):
+		return
+	if not await _walk_to_garden(id):
+		return
+	if basket and not await _put_in_cart(id, cart):
+		return
+	if not await _hitch_and_mount(id, cart, h):
+		return
+	if not await _drive(id, cart, OUT_SOUTH + GATE_WAY + [GATE_STOP]):
+		return
+	granny_ride = "board"
+	say("Тпру! Сідай, бабо, поїхали!", 2.5)
+	if not await _wait_granny(id, g, true):
+		return
+	granny_ride = "ride"
+	if kind == "market":
+		say("Но-о! На ринок!", 2.0)
+		if not await _drive(id, cart, GATE_LOOP + [Vector3(2.0, 0, 20.0), Vector3(3.0, 0, 31.0)] + VILLAGE_DOWN + [Vector3(1.6, 0, 90.0)]):
+			return
+		granny_ride = "there"
+		if not await _get_off(id, cart):
+			return
+		say("Далі — пішки, через місток.", 2.5)
+		for wp in [Vector3(-0.6, 0, 96.5), Vector3(-0.6, 0, 110.0), Vector3(-1.5, 0, 148.0)]:
+			await go(wp)
+			if id != job:
+				return
+		var bz = m.world.outer.bazaar
+		if bz:
+			for s in bz.sellers:
+				if String(s.get("shop", "")) == "tools" and s.has("front"):
+					await go(s["front"])
+					if id != job:
+						return
+					face((s["node"] as Node3D).global_position)
+					say("Почім, куме, сокири? Подивлюся, поки баба купує.", 3.0)
+					break
+		var t := 0.0
+		while id == job and not g.trip_done and g.doing == "trip" and t < 240.0:
+			await wait(1.0)
+			t += 1.0
+		if id != job:
+			return
+		say("Ходімо, бабо, до воза.", 2.0)
+		for wp in [Vector3(-0.6, 0, 110.0), Vector3(-0.6, 0, 96.5)]:
+			await go(wp)
+			if id != job:
+				return
+		if not await _hitch_and_mount(id, cart, h):
+			return
+		granny_ride = "back"
+		if not await _wait_granny(id, g, true):
+			return
+		granny_ride = "ride_home"
+		say("Но-о, коню! Додому!", 2.0)
+		if not await _drive(id, cart, [Vector3(-5.0, 0, 93.5), Vector3(-7.0, 0, 88.0), Vector3(-2.0, 0, 82.0), Vector3(5.5, 0, 68.0),
+				Vector3(5.5, 0, 50.0), Vector3(3.0, 0, 36.0)] + GATE_WAY + [GATE_STOP]):
+			return
+	else:
+		say("Гайда в ліс!", 2.0)
+		if not await _drive(id, cart, GATE_BACK + [Vector3(30.0, 0, 5.5), Vector3(71.0, 0, 5.0), Vector3(100.0, 0, 5.5), Vector3(110.0, 0, 1.5)]):
+			return
+		granny_ride = "there"
+		if not await _get_off(id, cart):
+			return
+		if not await _unhitch_here(id, cart):
+			return
+		if not await _take_from_cart(id, cart, [basket]):
+			return
+		var end: Vector3 = FOREST_WAY[FOREST_WAY.size() - 1]
+		await go(FOREST_WAY[6])
+		if id != job:
+			return
+		var got := 0
+		if forest and forest.has_method("nearest_kinds"):
+			for it in forest.nearest_kinds(end, 6, MUSHROOMS):
+				await go(forest.goods_pos(it) + Vector3(0.5, 0, 0.5))
+				if id != job:
+					return
+				face(forest.goods_pos(it))
+				play("pick")
+				await wait(0.9)
+				if id != job:
+					return
+				var n: int = forest.take(it)
+				got += n
+				if n > 0:
+					Util.basket_add(basket, forest.kind_color(it), 0.05)
+				play("idle")
+		say("Назбирав %d грибочків!" % got if got > 0 else "Сьогодні гриби вже позбирали…", 3.0)
+		if got > 0:
+			Game.emit_event("forest")
+		await go(FOREST_WAY[6])
+		if id != job:
+			return
+		if not await _put_in_cart(id, cart):
+			return
+		if not await _hitch_and_mount(id, cart, h):
+			return
+		granny_ride = "back"
+		if not await _wait_granny(id, g, true):
+			return
+		granny_ride = "ride_home"
+		say("Но-о, коню! Додому!", 2.0)
+		# повз подвір'я з боку садка віз не проїде (тин близько) — додому, як із млина: за садком і сільською дорогою
+		if not await _drive(id, cart, [Vector3(100.0, 0, 5.5), Vector3(71.0, 0, 5.0), Vector3(30.0, 0, 5.5), Vector3(26.8, 0, 13.0)]
+				+ OUT_SOUTH.slice(2) + GATE_WAY + [GATE_STOP]):
+			return
+	granny_ride = "home"
+	say("Тпру! Злазь, бабо, приїхали.", 2.5)
+	if not await _wait_granny(id, g, false):
+		return
+	granny_ride = ""
+	await _trip_home(id, cart, GATE_BACK)
+
+
+func _wait_granny(id: int, g, on: bool) -> bool:
+	## Чекає, поки бабуся сяде на віз (on) чи злізе з нього. Передумала їхати — дід їде сам.
+	var t := 0.0
+	while id == job and t < 150.0:
+		if (g.on_tractor != null) == on or g.doing != "trip":
+			break
+		await wait(0.5)
+		t += 0.5
+	return id == job
 
 
 # ---------------- по гриби

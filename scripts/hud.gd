@@ -482,20 +482,21 @@ const GIRL_ITEMS := [
 var granny_menu: Control
 var _granny_items := {}
 const GRANNY_ITEMS := [
-	["gr_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
-	["gr_milk", "Подоїти корову", Color(0.55, 0.62, 0.7)],
-	["gr_hens", "Нагодувати курей", Color(0.85, 0.65, 0.25)],
+	["gr_milk", "Піду подою корову", Color(0.55, 0.62, 0.7)],
+	["gr_hens", "Нагодую курей", Color(0.85, 0.65, 0.25)],
+	["gr_cook", "Приготую їсти", Color(0.75, 0.25, 0.3)],
 	["gr_garden", "Прополоти город", Color(0.35, 0.6, 0.3)],
-	["gr_borscht", "Зварити борщ", Color(0.75, 0.25, 0.3)],
-	["gr_pies", "Спекти пиріжки", Color(0.85, 0.5, 0.2)],
+	["gr_market", "Поїхати на ринок", Color(0.85, 0.5, 0.2)],
+	["gr_rest", "Піду відпочину", Color(0.45, 0.6, 0.75)],
+	["gr_forest", "Поїду в ліс", Color(0.3, 0.5, 0.3)],
 ]
 
 
 func show_granny_menu(night: bool, milking: bool) -> void:
-	## Меню бабусі: удень — усі справи (нова справа замінює ту, що бабуся робить зараз), уночі — лише розмова.
-	for k in ["gr_milk", "gr_hens", "gr_garden", "gr_borscht", "gr_pies"]:
+	## Меню бабусі: удень — усі справи (нова справа замінює ту, що бабуся робить зараз), уночі — лише відпочити.
+	for k in ["gr_milk", "gr_hens", "gr_cook", "gr_garden", "gr_market", "gr_forest"]:
 		_granny_items[k].visible = not night
-	_granny_items["gr_milk"].text = "Подоїти корову" if not milking else "Вже доїть корову…"
+	_granny_items["gr_milk"].text = "Піду подою корову" if not milking else "Вже доїть корову…"
 	_granny_items["gr_milk"].disabled = milking
 	_open_menu(granny_menu)
 

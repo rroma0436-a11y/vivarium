@@ -553,6 +553,16 @@ func goods_pos(i: int) -> Vector3:
 	return goods[i]["pos"]
 
 
+func nearest_kinds(from: Vector3, n: int, kinds: Array) -> Array:
+	## Найближчі n того, що можна брати, лише вказаних видів (гриби — дідові, ягоди й трави — бабусі).
+	var list: Array = []
+	for i in goods.size():
+		if can_take(i) and String(goods[i]["kind"]) in kinds:
+			list.append(i)
+	list.sort_custom(func(a, b): return (goods[a]["pos"] as Vector3).distance_to(from) < (goods[b]["pos"] as Vector3).distance_to(from))
+	return list.slice(0, n)
+
+
 func nearest_goods(from: Vector3, n: int) -> Array:
 	var list: Array = []
 	for i in goods.size():
