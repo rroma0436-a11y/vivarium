@@ -32,6 +32,7 @@ func setup(at: Vector3, shed_door: Vector3, id := "bull", h := 1.55, past := PAS
 	door = shed_door
 	kind = id
 	pasture = past
+	home_pasture = past
 	size_h = h
 	position = at
 	_target = at
@@ -85,6 +86,9 @@ func _play(k: String, sp := 1.0) -> void:
 func poke() -> void:
 	## Торкнулися — мукає й підстрибує на місці.
 	if mode == "inside" or mode == "hitched":
+		return
+	if mode == "herded" or mode == "drinking":
+		say(voices[randi() % voices.size()], 2.0)       # іде табуном чи п'є — лише іржить, з дороги не збивається
 		return
 	if mode == "milking":
 		say("Му-у… Мене доять!", 2.0)          # стоїть смирно, не стрибає
@@ -140,7 +144,7 @@ func _process(delta: float) -> void:
 				_target = position + Vector3(2.5, 0, randf_range(-2, 2))
 			say("Му-у! Доброго ранку!", 2.5)
 		return
-	if night and (mode == "free" or mode == "to_pasture"):
+	if night and (mode == "free" or mode == "to_pasture" or mode == "drinking"):
 		send_home()
 	if _busy > 0.0:
 		_busy -= delta
@@ -160,6 +164,24 @@ func _process(delta: float) -> void:
 				_play("walk", 0.9 * clampf(speed_k, 1.0, 1.6))
 		if bpose:
 			bpose.peck = lerpf(bpose.peck, 0.0, 0.1)
+		return
+	if mode == "herded":
+		if _path.size() > 0:
+			_target = _path.pop_front()
+			return
+		mode = _herd_end
+		speed_k = 1.0
+		_pause = randf_range(1.0, 3.0)
+		return
+	if mode == "drinking":
+		# стоїть на березі мордою до води, голова донизу — п'є
+		if drink_face != Vector3.INF:
+			var df := drink_face - position
+			_turn_to(atan2(df.x, df.z), delta)
+		_play("idle")
+		_drink_t += delta
+		if bpose:
+			bpose.peck = lerpf(bpose.peck, 0.8 + sin(_drink_t * 2.2) * 0.05, 1.0 - exp(-delta * 1.6))
 		return
 	if mode == "to_shed":
 		if _path.size() > 0:
@@ -217,13 +239,19 @@ func send_home(fast := false) -> void:
 	_graze = 0.0
 	_busy = 0.0
 	speed_k = 2.0 if fast else 1.0
+	pasture = home_pasture
+	var gw := gate_way.duplicate()
+	gate_way = []
 	if back_door != Vector3.ZERO:
 		_path = [back_door + Vector3(-3.0, 0, 0)]
 		_target = back_door
 		return
 	# з пасовиська — обходом навколо будівлі до передніх дверей, крізь них — усередину
 	var via: Array = []
-	if not yard_way.is_empty() and position.distance_to(yard_way.back()) < position.distance_to(door):
+	if not gw.is_empty() and position.distance_to(gw.back()) < position.distance_to(gw[0]):
+		gw.reverse()                       # за огорожею ферми — спершу крізь ворота
+		via = gw
+	elif not yard_way.is_empty() and position.distance_to(yard_way.back()) < position.distance_to(door):
 		via = yard_way.duplicate()
 		via.reverse()
 	_path = via + [door, door + door_in]
@@ -231,6 +259,33 @@ func send_home(fast := false) -> void:
 
 
 var yard_way: Array = []                # від передніх дверей надвір — обхід будівлі до пасовиська (порожньо — одразу)
+var home_pasture := PASTURE             # своя левада (куди повертається з пасовиська за фермою)
+var gate_way: Array = []                # пасеться за огорожею ферми: ворота [зсередини, ззовні] — увечері додому крізь них
+var drink_face := Vector3.INF           # п'є: куди дивиться (на воду)
+var _herd_end := "free"
+var _drink_t := 0.0
+
+
+func herd(path: Array, end_mode := "free") -> void:
+	## Конюх жене: іде точками path (зі стайні — спершу крізь двері), наприкінці — end_mode ("free" пастися, "drinking" пити).
+	if mode == "hitched" or mode == "parked" or mode == "milking":
+		return
+	var p := path.duplicate()
+	if mode == "inside":
+		visible = true
+		position = door + door_in
+		rotation.y = atan2(-door_in.x, -door_in.z)
+		_yaw_v = 0.0
+		p.push_front(door)
+	kept_in = false
+	mode = "herded"
+	_herd_end = end_mode
+	_graze = 0.0
+	_busy = 0.0
+	_drink_t = 0.0
+	speed_k = 2.2
+	_path = p
+	_target = _path.pop_front() if not _path.is_empty() else position
 
 
 func _pasture_point() -> Vector3:
@@ -452,6 +507,8 @@ func hitch_begin() -> void:
 	_path = []
 	speed_k = 1.0
 	kept_in = false
+	pasture = home_pasture
+	gate_way = []
 	if bpose:
 		bpose.peck = 0.0
 

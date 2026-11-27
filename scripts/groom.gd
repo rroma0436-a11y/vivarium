@@ -1,6 +1,7 @@
 extends "res://scripts/farmhand.gd"
-## Конюх Семен: живе в хаті села. Зранку приходить на ферму й випускає коней пастися, одного запрягає
-## у віз і їде до копиці біля пшеничного поля по сіно; привозить сіно на ферму. Увечері заганяє коней у стайні.
+## Конюх Семен: живе в хаті села. Зранку приходить на ферму, відчиняє стайні й жене коней за задні ворота
+## пастися (за 30 м від ферми); напуває їх на річці; одного запрягає у віз і їде до копиці по сіно.
+## Увечері заганяє коней у стайні.
 
 const STABLE_DOOR := Vector3(-187.0, 0, 39.7)          # перша стайня на фермі за ставком (двері на схід)
 const STABLE_DOORS := [Vector3(-187.0, 0, 39.7), Vector3(-187.0, 0, 55.7), Vector3(-187.0, 0, 71.7)]
@@ -11,10 +12,20 @@ const HAY_IN := Vector3(-21.9, 0, -57.0)              # звертає з дор
 const HAY_STOP := Vector3(-21.9, 0, -68.9)            # кінь став так, що віз — боком упритул до копиці (HAY_N)
 const HAY_OUT := Vector3(-26.0, 0, -62.0)             # розвертається від копиці назад на дорогу
 const MOUNT_X := 1.0                                   # де стає збоку воза, щоб вилізти на передок
+const FENCE_N := 28.0                                  # північний (задній) бік забору ферми
+const FENCE_S := 83.0                                  # південний (передній) бік — до річки
+const N_IN := Vector3(-171.5, 0, 32.0)                 # задні ворота: зсередини ферми
+const N_OUT := Vector3(-171.5, 0, 23.0)                # задні ворота: ззовні
+const S_IN := Vector3(-171.5, 0, 78.0)                 # передні ворота: зсередини
+const S_OUT := Vector3(-171.5, 0, 88.0)                # передні ворота: ззовні (до річки)
+const OUT_PASTURE := Rect2(-184.0, -8.0, 25.0, 10.0)   # пасовисько за задніми воротами (≈30 м від ферми)
+const DRINK_Z := 96.7                                  # де коні стають на березі річки
+const RIVER_WAIT := Vector3(-164.5, 0, 92.5)           # де конюх чекає, поки коні п'ють
 var _stand_h := 0.95                                   # висота стегон, коли стоїть
 
 var riding: Node3D = null
 var _trip_day := -1
+var _talk_t := 0.0
 var hay_load: Node3D                 # сіно на возі (росте, коли накладає)
 
 
@@ -23,7 +34,7 @@ func setup_groom(home: Vector3, route: Array) -> void:
 			"wave": ["big_wave"], "proud": ["proud_strut"], "pick": ["collect_object"], "drink": ["stand_and_drink"]},
 		["idle", "walk", "run", "pick"],
 		["Я — Семен, конюх. Мій гнідий — найкращий у селі!", "Коня треба чистити щодня й говорити з ним лагідно.",
-		 "Зранку випускаю коней пастися, а сам — возом по сіно до копиці.", "Овес, вода й добре слово — ось уся наука.", "Тпру-у! Стій, красеню!"],
+		 "Зранку виганяю коней за задні ворота пастися, а вдень веду на річку напитися.", "Овес, вода й добре слово — ось уся наука.", "Тпру-у! Стій, красеню!"],
 		[], "npc")
 	Models.give_nika_anims(ap, anims)
 	setup_pose()
@@ -41,6 +52,22 @@ func horses() -> Array:
 
 
 func _process(delta: float) -> void:
+	if _talk_t > 0.0 and riding == null:
+		# розмовляє з Нікою: стоїть лицем до неї (справа, яку робив, чекає)
+		_talk_t -= delta
+		if _bubble_left > 0.0:
+			_bubble_left -= delta
+			if _bubble_left <= 0.0:
+				bubble.visible = false
+		var nk: Node3D = main.girl if main and main.girl else null
+		if nk:
+			var d := nk.global_position - global_position
+			if Vector2(d.x, d.z).length() > 0.05:
+				rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), 1.0 - exp(-delta * 5.0))
+		play("talk")
+		if pose:
+			pose.life = lerpf(pose.life, 1.0, 1.0 - exp(-delta * 3.0))
+		return
 	if riding:
 		if _bubble_left > 0.0:
 			_bubble_left -= delta
@@ -62,9 +89,110 @@ func on_arrived() -> void:
 	await horses_out()
 
 
-func horses_out() -> void:
-	## Обходить стайні й випускає коней пастися на леваду.
+func _zone(p: Vector3) -> String:
+	if p.z < FENCE_N:
+		return "back"
+	if p.z > FENCE_S:
+		return "river"
+	return "farm"
+
+
+func _walk(p: Vector3) -> void:
+	## Іде до точки, обходячи забір ферми крізь ворота.
+	var a := _zone(global_position)
+	var b := _zone(p)
+	var via: Array = []
+	if a == "farm" and b == "back":
+		via = [N_IN, N_OUT]
+	elif a == "back" and b == "farm":
+		via = [N_OUT, N_IN]
+	elif a == "farm" and b == "river":
+		via = [S_IN, S_OUT]
+	elif a == "river" and b == "farm":
+		via = [S_OUT, S_IN]
+	elif a == "back" and b == "river":
+		via = [N_OUT, N_IN, S_IN, S_OUT]
+	elif a == "river" and b == "back":
+		via = [S_OUT, S_IN, N_IN, N_OUT]
+	for v in via:
+		await _goto(v, 1.5)
+	await _goto(p, 1.5)
+
+
+func _herdable() -> Array:
+	## Коні, яких можна гнати (не запряжені, не під Нікою, не в стайні).
+	var list: Array = []
+	for h in horses():
+		if h.mode in ["free", "to_pasture", "herded", "drinking", "to_shed"]:
+			list.append(h)
+	return list
+
+
+func _pasture_spot(i: int, n: int) -> Vector3:
+	var r := OUT_PASTURE
+	var x := r.position.x + r.size.x * (i + 0.5) / maxf(1.0, n) + randf_range(-1.5, 1.5)
+	return Vector3(x, 0, randf_range(r.position.y + 1.0, r.end.y - 1.0))
+
+
+func _paddock_spot(h) -> Vector3:
+	var r: Rect2 = h.home_pasture
+	return Vector3(randf_range(r.position.x + 1.0, r.end.x - 1.0), 0, randf_range(r.position.y + 1.0, r.position.y + 12.0))
+
+
+func _passed(herd: Array, m: int, i: int) -> bool:
+	## Усі коні вже минули i-ту точку шляху (шлях із m точок)?
+	for h in herd:
+		if h.mode == "herded" and h._path.size() >= m - 1 - i:
+			return false
+	return true
+
+
+func _behind(herd: Array, toward: Vector3) -> Vector3:
+	## Місце позаду табуну (з протилежного боку від того, куди гнати).
+	var c := Vector3.ZERO
+	for h in herd:
+		c += h.global_position
+	c /= maxf(1.0, herd.size())
+	c.y = 0.0
+	var d := c - toward
+	d.y = 0.0
+	if d.length() < 0.5:
+		d = Vector3(0, 0, 1)
+	return c + d.normalized() * 5.0
+
+
+func _drive(herd: Array, pts: Array, finals: Array, end_mode: String, stop_at: Vector3) -> void:
+	## Жене табун точками pts (кожен кінь — трохи збоку, щоб не товклися), наприкінці кожен — у своє місце finals[i].
+	## Сам іде слідом тими самими точками, не обганяючи останнього коня, і стає в stop_at.
+	var my := job
+	var n := herd.size()
+	for i in n:
+		var ofs := Vector3((i - (n - 1) / 2.0) * 1.3, 0, 0)
+		var path: Array = []
+		for p in pts:
+			path.append(p + ofs)
+		path.append(finals[i])
+		herd[i].herd(path, end_mode)
+		await wait(1.6)
+		if job != my:
+			return
+	var m := pts.size() + 1
+	for i in pts.size():
+		var t := 0.0
+		while t < 60.0 and not _passed(herd, m, i):
+			t += 0.5
+			await wait(0.5)
+		if job != my:
+			return
+		await _goto(pts[i], 1.5)
+	await _goto(stop_at, 1.5)
+
+
+func _open_stables() -> void:
+	## Обходить стайні, відчиняє їх і випускає коней надвір (стають біля стаєнь).
+	var my := job
 	var first := true
+	var out: Array = []
 	for d in STABLE_DOORS:
 		var inside: Array = []
 		for h in horses():
@@ -72,38 +200,207 @@ func horses_out() -> void:
 				inside.append(h)
 		if inside.is_empty():
 			continue
-		await _goto(d + Vector3(1.6, 0, 0))
-		await go(d + Vector3(-2.4, 0, 0), false, false)          # заходить у стайню крізь двері
+		await _walk(d + Vector3(1.6, 0, 0))
+		if job != my:
+			return
+		await go(d + Vector3(-2.4, 0, 0), false, false)          # відчиняє двері й заходить у стайню
 		face(d + Vector3(-5.0, 0, 0))
-		say("Доброго ранку, коні! Ідіть пастися!" if first else "Виходь, красеню, на траву!", 2.5)
+		say("Доброго ранку, коні! Виходьте!" if first else "Виходь, красеню, надвір!", 2.5)
 		first = false
 		await act("wave", 2.0)
 		await go(d + Vector3(1.6, 0, 0), false, false)           # виходить надвір
 		await go(d + Vector3(1.8, 0, 2.2), false, false)         # і стає збоку від дверей
 		face(d)
 		for h in inside:
-			h.send_out()
+			h.herd([d + Vector3(4.5, 0, randf_range(-2.5, 2.5))], "free")
+			out.append(h)
 			await wait(0.8)
+	var t := 0.0
+	while t < 15.0:
+		var all_out := true
+		for h in out:
+			if h.mode == "herded":
+				all_out = false
+		if all_out:
+			break
+		t += 0.5
+		await wait(0.5)
+
+
+func _to_farm(herd: Array) -> void:
+	## Тих коней, що за огорожею (на пасовиську чи біля річки), — заганяє на ферму.
+	var my := job
+	for z in ["back", "river"]:
+		var grp: Array = []
+		for h in herd:
+			if _zone(h.global_position) == z:
+				grp.append(h)
+		if grp.is_empty():
+			continue
+		var pts: Array = [N_OUT, N_IN] if z == "back" else [S_OUT, S_IN]
+		await _walk(_behind(grp, pts[0]) if z == "back" else RIVER_WAIT)
+		if job != my:
+			return
+		say("Гайда на ферму, коні!", 2.0)
+		var fin: Array = []
+		for h in grp:
+			h.pasture = h.home_pasture
+			h.gate_way = []
+			fin.append(_paddock_spot(h) if z == "back" else Vector3(randf_range(-176.0, -167.0), 0, randf_range(64.0, 70.0)))
+		await _drive(grp, pts, fin, "free", (pts[1] as Vector3) + (Vector3(0, 0, 4.0) if z == "back" else Vector3(0, 0, -4.0)))
+		if job != my:
+			return
+
+
+func horses_out() -> void:
+	## Іде до стаєнь, відчиняє їх і випускає коней, а тоді жене табун за задні ворота — пастися за 30 м від ферми.
+	var my := job
+	await _open_stables()
+	if job != my:
+		return
+	var herd: Array = []
+	for h in _herdable():
+		if _zone(h.global_position) != "back":
+			herd.append(h)
+	if herd.is_empty():
+		say("Коні вже пасуться за фермою!", 2.5)
+		return
+	if herd.any(func(h): return _zone(h.global_position) == "river"):
+		await _to_farm(herd)
+		if job != my:
+			return
+	await _walk(_behind(herd, N_IN))
+	if job != my:
+		return
+	say("Гей-гей, на пасовисько! Через задні ворота!", 2.5)
+	await act("wave", 1.5)
+	var fin: Array = []
+	for i in herd.size():
+		herd[i].pasture = OUT_PASTURE
+		herd[i].gate_way = [N_IN, N_OUT]
+		fin.append(_pasture_spot(i, herd.size()))
+	await _drive(herd, [N_IN, N_OUT], fin, "free", Vector3(-171.5, 0, 6.0))
+	if job == my:
+		face(Vector3(OUT_PASTURE.get_center().x, 0, OUT_PASTURE.get_center().y))
+		say("Пасіться, мої коні! Увечері прийду по вас.", 3.0)
+		await act("wave", 1.5)
+
+
+func horses_drink() -> void:
+	## Жене коней до річки: з ферми — крізь передні ворота, з пасовиська за фермою — через усю ферму.
+	## Коні стають на березі, нахиляють голови й п'ють; потім жене їх назад — на ферму або на пасовисько.
+	var my := job
+	if horses().any(func(h): return h.mode == "inside"):
+		await _open_stables()
+		if job != my:
+			return
+	var herd := _herdable()
+	if herd.is_empty():
+		say("Коні зараз зайняті — напою пізніше.", 2.5)
+		return
+	var back: Array = []
+	var farm: Array = []
+	for h in herd:
+		if _zone(h.global_position) == "back":
+			back.append(h)
+		else:
+			farm.append(h)
+	var to_back := back.size() >= farm.size()
+	var pts: Array
+	if farm.is_empty():
+		pts = [N_OUT, N_IN, S_IN, S_OUT]
+	else:
+		if not back.is_empty():
+			await _to_farm(back)
+			if job != my:
+				return
+		pts = [S_IN, S_OUT]
+	await _walk(_behind(herd, pts[0]))
+	if job != my:
+		return
+	say("Ходіть, коні, до річки — водички поп'ємо!", 2.5)
+	await act("wave", 1.5)
+	var n := herd.size()
+	var fin: Array = []
+	for i in n:
+		var s := Vector3(-171.5 + (i - (n - 1) / 2.0) * 2.6, 0, DRINK_Z)
+		fin.append(s)
+		herd[i].drink_face = s + Vector3(0, 0, 3.0)
+		herd[i].gate_way = [S_IN, S_OUT]
+		herd[i].pasture = herd[i].home_pasture
+	await _drive(herd, pts, fin, "drinking", RIVER_WAIT)
+	if job != my:
+		return
+	var t := 0.0
+	while t < 40.0 and herd.any(func(h): return h.mode == "herded"):
+		t += 0.5
+		await wait(0.5)
+	face(Vector3(-171.5, 0, DRINK_Z))
+	say("Пийте, мої хороші, пийте…", 3.0)
+	await act("talk", 3.0)
+	await wait(7.0)
+	if job != my:
+		return
+	herd = herd.filter(func(h): return h.mode == "drinking")
+	if herd.is_empty():
+		return
+	say("Напилися? Гайда назад — " + ("на пасовисько!" if to_back else "на ферму!"), 2.5)
+	await act("wave", 1.5)
+	fin = []
+	for i in herd.size():
+		if to_back:
+			herd[i].pasture = OUT_PASTURE
+			herd[i].gate_way = [N_IN, N_OUT]
+			fin.append(_pasture_spot(i, herd.size()))
+		else:
+			herd[i].pasture = herd[i].home_pasture
+			herd[i].gate_way = []
+			fin.append(_paddock_spot(herd[i]))
+	if to_back:
+		await _drive(herd, [S_OUT, S_IN, N_IN, N_OUT], fin, "free", Vector3(-171.5, 0, 6.0))
+	else:
+		await _drive(herd, [S_OUT, S_IN], fin, "free", S_IN + Vector3(3.0, 0, -6.0))
+	if job == my:
+		say("Отак, напоєні!", 2.0)
 
 
 func horses_in() -> void:
-	## Заганяє всіх коней у стайні (запряженого — коли віз повернеться).
+	## Заганяє всіх коней у стайні (запряженого — коли віз повернеться); з пасовиська — крізь задні ворота, від річки — крізь передні.
+	var my := job
 	var t := 0.0
 	while main.horse and main.horse.mode == "hitched" and riding == null and t < 120.0:
 		t += 1.0
 		await wait(1.0)
-	await _goto(STABLE_DOOR + Vector3(3.5, 0, 6.0), 1.5)
+	var herd := _herdable()
+	var back := herd.filter(func(h): return _zone(h.global_position) == "back")
+	var river := herd.filter(func(h): return _zone(h.global_position) == "river")
+	if not back.is_empty():
+		await _walk(_behind(back, N_OUT))
+	elif not river.is_empty():
+		await _walk(RIVER_WAIT)
+	else:
+		await _goto(STABLE_DOOR + Vector3(3.5, 0, 6.0), 1.5)
+	if job != my:
+		return
 	say("Ходіть у стайні, мої коні!", 2.5)
 	await act("wave", 2.0)
-	for h in horses():
-		if h.mode == "free" or h.mode == "to_pasture":
-			h.kept_in = true
-			h.send_home()
+	for h in herd:
+		h.kept_in = true
+		h.send_home(true)
+	var outside: Array = back + river
 	t = 0.0
-	while t < 45.0:
+	while t < 40.0 and outside.any(func(h): return h.mode == "to_shed" and _zone(h.global_position) != "farm"):
+		t += 1.0
+		await wait(1.0)
+	if job != my:
+		return
+	if not outside.is_empty():
+		await _walk(STABLE_DOOR + Vector3(3.5, 0, 6.0))
+	t = 0.0
+	while t < 60.0:
 		var all_in := true
 		for h in horses():
-			if h.mode == "free" or h.mode == "to_pasture" or h.mode == "to_shed":
+			if h.mode in ["free", "to_pasture", "to_shed", "herded", "drinking"]:
 				all_in = false
 		if all_in:
 			break
@@ -160,6 +457,11 @@ func command(what: String) -> void:
 			if id == job:
 				say("Усі коні в стайнях!", 2.0)
 			end_job(id)
+		"water":
+			cancel_job()
+			var id := begin_job("stable")
+			await horses_drink()
+			end_job(id)
 		"hay":
 			if not can_go_hay():
 				say("Віз зайнятий — поїду пізніше.", 2.5)
@@ -192,6 +494,19 @@ func trip(id: int) -> void:
 	_make_load(cart)
 	if horse.mode == "inside":
 		horse.send_out()
+	elif _zone(horse.global_position) != "farm":
+		# кінь пасеться за огорожею — кличе його на ферму крізь ворота
+		say("Гнідий, ходи-но сюди — поїдемо по сіно!", 2.5)
+		var gw: Array = [N_OUT, N_IN] if _zone(horse.global_position) == "back" else [S_OUT, S_IN]
+		horse.pasture = horse.home_pasture
+		horse.gate_way = []
+		horse.herd(gw + [cart.to_global(Vector3(3.0, 0, -3.0))], "free")
+		var t := 0.0
+		while t < 90.0 and horse.mode == "herded":
+			t += 0.5
+			await wait(0.5)
+		if id != job:
+			return
 	say("Запряжу коня — поїду по сіно!", 3.0)
 	await _goto(cart.to_global(Vector3(1.9, 0, 0.0)), 1.5)
 	if id != job:
@@ -370,6 +685,53 @@ func _obs() -> Array:
 			var p2: Vector3 = h.global_position + f * k
 			list.append([Vector2(p2.x, p2.z), 0.42, 1.5])
 	return list
+
+
+func talk_nika() -> void:
+	## «Поговорити»: обертається лицем до Ніки й заводить розмову.
+	var nk: Node3D = main.girl
+	if riding == null:
+		_talk_t = 60.0
+	if nk and main._mount_state == "":
+		main._girl_face(global_position)
+	var txt: String = lines[_line % lines.size()] if lines.size() > 0 else ""
+	_line += 1
+	say(txt, 3.5)
+	main.audio.play_at("question", self, -4.0)
+	var f := "res://assets/ui/groom.png"
+	main.hud.show_dialog("Конюх Семен", txt + "\n" + _horses_news(), load(f) if ResourceLoader.exists(f) else null,
+		func(): _talk_t = 0.0)
+
+
+func _horses_news() -> String:
+	if riding:
+		return "Я саме на возі — їду по сіно."
+	var inside := 0
+	var back := 0
+	var river := 0
+	var farm := 0
+	for h in horses():
+		if h.mode == "inside" or h.mode == "to_shed":
+			inside += 1
+		elif h.mode == "hitched" or h.mode == "parked":
+			continue
+		elif _zone(h.global_position) == "back":
+			back += 1
+		elif _zone(h.global_position) == "river":
+			river += 1
+		else:
+			farm += 1
+	var parts: Array = []
+	if inside > 0:
+		parts.append("у стайнях — %d" % inside)
+	if farm > 0:
+		parts.append("на леваді — %d" % farm)
+	if back > 0:
+		parts.append("на пасовиську за фермою — %d" % back)
+	if river > 0:
+		parts.append("біля річки — %d" % river)
+	var t := ("Коні зараз: " + ", ".join(parts) + ".\n") if not parts.is_empty() else ""
+	return t + "Скажи, що робити: випустити коней пастися, напоїти, загнати в стайні чи поїхати по сіно."
 
 
 func before_leave() -> void:

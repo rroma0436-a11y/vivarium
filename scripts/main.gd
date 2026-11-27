@@ -1040,16 +1040,19 @@ func _on_action(name: String) -> void:
 			if shepherd:
 				shepherd.command("out" if name == "sh_out" else "in")
 				_follow_later(shepherd)
-		"gm_out", "gm_in", "gm_hay":
+		"gm_out", "gm_in", "gm_hay", "gm_water":
 			if groom:
-				groom.command({"gm_out": "out", "gm_in": "in", "gm_hay": "hay"}[name])
+				groom.command({"gm_out": "out", "gm_in": "in", "gm_hay": "hay", "gm_water": "water"}[name])
 				_follow_later(groom)
+		"gm_talk":
+			if groom:
+				groom.talk_nika()
 		"gv_repair", "gv_test", "gv_eggs":
 			if gvintyk:
 				gvintyk.command({"gv_repair": "repair", "gv_test": "test", "gv_eggs": "eggs"}[name])
 				_follow_later(gvintyk)
-		"sh_talk", "gm_talk", "gv_talk":
-			var who = {"sh_talk": shepherd, "gm_talk": groom, "gv_talk": gvintyk}[name]
+		"sh_talk", "gv_talk":
+			var who = {"sh_talk": shepherd, "gv_talk": gvintyk}[name]
 			if who:
 				who.talk(rig.cam.global_position)
 				audio.play_at("robot_beep" if who == gvintyk else "question", who, -4.0)
