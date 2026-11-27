@@ -113,6 +113,9 @@ void sky() {
 	// панорама: верхній рядок — зеніт, нижній — обрій; нижче обрію — колір обрію (там ліс і земля)
 	float el = asin(clamp(d.y, 0.0, 1.0));
 	vec3 c = pano(vec2(fract(u), clamp(1.0 - el / 1.5707963, 0.002, 0.998)));
+	// біля обрію вдень — м'який бузковий серпанок замість жовто-помаранчевої смуги
+	float hz = (1.0 - night) * (1.0 - smoothstep(0.0, 0.4, d.y));
+	c = mix(c, vec3(0.5, 0.42, 0.6), hz * 0.6);
 	// біля зеніту панорама стягується в точку — там рівний купол
 	float up = smoothstep(0.72, 0.95, d.y);
 	if (up > 0.0) {
@@ -135,9 +138,9 @@ void sky() {
 			vec3 s2 = cross(s1, sd);
 			float rot = atan(dot(d, s2), dot(d, s1));
 			float rays = pow(0.5 + 0.5 * cos(rot * 13.0 + sin(rot * 3.0) * 0.7), 4.0) * smoothstep(0.05, 0.18, ang);
-			vec3 add = vec3(0.25, 0.16, 0.06) * exp(-ang * 2.5)
-				+ vec3(0.35, 0.5, 0.12) * exp(-ang * 7.0)
-				+ vec3(0.25, 0.13, 0.07) * rays * exp(-ang * 2.2);
+			vec3 add = vec3(0.1, 0.07, 0.06) * exp(-ang * 4.0)
+				+ vec3(0.3, 0.26, 0.16) * exp(-ang * 12.0)
+				+ vec3(0.12, 0.08, 0.07) * rays * exp(-ang * 3.0);
 			c += add * sv;
 			float disk = smoothstep(0.075, 0.064, ang);
 			vec3 dcol = mix(vec3(1.0, 0.92, 0.45), vec3(1.0, 0.7, 0.2), smoothstep(0.0, 0.075, ang));
@@ -254,7 +257,7 @@ func update_time(_force := false) -> void:
 	var tint := Color(0.86, 0.86, 0.88).lerp(Color(0.95, 0.78, 0.72), dusk * 0.8)
 	sky_mat.set_shader_parameter("night", n)
 	sky_mat.set_shader_parameter("tint", Vector3(tint.r, tint.g, tint.b))
-	env.fog_light_color = Color(0.95, 0.56, 0.4).lerp(Color(0.2, 0.17, 0.45), n).lerp(Color(0.95, 0.62, 0.48), dusk * 0.5)    # під колір обрію нового неба
+	env.fog_light_color = Color(0.62, 0.6, 0.76).lerp(Color(0.2, 0.18, 0.4), n).lerp(Color(0.8, 0.62, 0.68), dusk * 0.4)    # бузковий серпанок, як обрій неба
 	# вогники: вікна хати, кімнати, світлячки
 	for l in window_lights:
 		(l as OmniLight3D).light_energy = 1.4 * smoothstep(0.3, 0.8, n)
