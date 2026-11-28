@@ -1030,9 +1030,8 @@ func _on_action(name: String) -> void:
 			_follow_later(grandpa)
 		"kid_talk":
 			if kid:
-				kid.talk(rig.cam.global_position)
-				audio.play_at("question", kid, -4.0)
-		"kid_water", "water":
+				kid.talk_nika()
+		"water":
 			if kid:
 				kid.say("Зараз принесу води!", 2.0)
 				kid.command("water")

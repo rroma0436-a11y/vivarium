@@ -451,10 +451,9 @@ func show_grandpa_menu(_at_home: bool, _busy_outside: bool) -> void:
 var kid_menu: Control
 var _kid_items := {}
 const KID_ITEMS := [
+	["kid_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
 	["kid_feed", "Нагодувати корів і коней", Color(0.85, 0.65, 0.25)],
 	["kid_clean", "Прибрати в корівниках і стайнях", Color(0.55, 0.45, 0.3)],
-	["kid_water", "Принести води Бімові й курям", Color(0.3, 0.62, 0.8)],
-	["kid_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
 ]
 
 var shepherd_menu: Control
@@ -564,8 +563,8 @@ func _open_menu(m: Control) -> void:
 
 
 func show_kid_menu(busy: bool) -> void:
-	## Меню Тарасика: нагодувати худобу, прибрати, принести води.
-	for k in ["kid_feed", "kid_clean", "kid_water"]:
+	## Меню Тарасика: поговорити, нагодувати худобу, прибрати.
+	for k in ["kid_feed", "kid_clean"]:
 		_kid_items[k].visible = not busy
 	_open_menu(kid_menu)
 
