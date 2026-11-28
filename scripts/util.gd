@@ -538,6 +538,8 @@ static func speak(who: Node3D, id: String, text: String) -> void:
 	if id == "girl" or id == "karli":
 		preload("res://scripts/nika_voice.gd").play(text, true)      # Ніка — записаним голосом
 		return
+	if id == "grandpa" and preload("res://scripts/grandpa_voice.gd").play(text):
+		return                             # дідусь — записаним голосом (якщо така репліка є)
 	if _tts.is_empty():
 		_pick_voices()
 		if _tts.is_empty():

@@ -296,6 +296,8 @@ func show_dialog(who: String, text: String, portrait: Texture2D = null, then := 
 			if m.hero != "karli" and m.get("girl"):
 				Util.speak(m.girl, m.hero, text)
 		preload("res://scripts/nika_voice.gd").play(text, true)
+	elif who == "Дідусь Петро":
+		preload("res://scripts/grandpa_voice.gd").play(text)
 	dialog_name.text = who
 	dialog_text.text = text
 	dialog_scroll.scroll_vertical = 0
