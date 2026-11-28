@@ -19,6 +19,8 @@
 - U.S. Fish & Wildlife Service, «Bear Growls» (AntumDeluge, OpenGameArt) — CC0 (Ведмідь ричить)
 - U.S. National Park Service / Nivatius (freesound.org), simcotter (freesound.org) — Public Domain / CC0 (Грізлі, виття)
 
+- Звуки природи (біля річки, біля ставка, ліс удень і вночі, дятел, дощ, гроза) — надані автором гри
+
 ## Шрифти
 - DejaVu Sans — вільна ліцензія DejaVu
 - Ruslan Display — SIL Open Font License
