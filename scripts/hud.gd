@@ -462,9 +462,10 @@ var groom_menu: Control
 var gv_menu: Control
 var _worker_items := {}
 const SHEPHERD_ITEMS := [
-	["sh_out", "Вигнати худобу на пасовисько (задні ворота)", Color(0.4, 0.62, 0.3)],
-	["sh_in", "Загнати худобу в корівник", Color(0.6, 0.45, 0.3)],
-	["sh_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
+	["pas_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
+	["pas_out", "Випустити худобу пастися", Color(0.4, 0.62, 0.3)],
+	["pas_water", "Напоїти худобу", Color(0.3, 0.55, 0.8)],
+	["pas_in", "Загнати худобу", Color(0.6, 0.45, 0.3)],
 ]
 const GROOM_ITEMS := [
 	["gm_talk", "Поговорити", Color(0.45, 0.6, 0.75)],

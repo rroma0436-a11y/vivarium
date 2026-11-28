@@ -1041,10 +1041,13 @@ func _on_action(name: String) -> void:
 			if kid:
 				kid.command("feed" if name == "kid_feed" else "clean")
 				_follow_later(kid)
-		"sh_out", "sh_in":
+		"pas_out", "pas_in", "pas_water":
 			if shepherd:
-				shepherd.command("out" if name == "sh_out" else "in")
+				shepherd.command({"pas_out": "out", "pas_in": "in", "pas_water": "water"}[name])
 				_follow_later(shepherd)
+		"pas_talk":
+			if shepherd:
+				shepherd.talk_nika()
 		"gm_out", "gm_in", "gm_hay", "gm_water":
 			if groom:
 				groom.command({"gm_out": "out", "gm_in": "in", "gm_hay": "hay", "gm_water": "water"}[name])
@@ -1056,11 +1059,10 @@ func _on_action(name: String) -> void:
 			if gvintyk:
 				gvintyk.command({"gv_repair": "repair", "gv_test": "test", "gv_eggs": "eggs"}[name])
 				_follow_later(gvintyk)
-		"sh_talk", "gv_talk":
-			var who = {"sh_talk": shepherd, "gv_talk": gvintyk}[name]
-			if who:
-				who.talk(rig.cam.global_position)
-				audio.play_at("robot_beep" if who == gvintyk else "question", who, -4.0)
+		"gv_talk":
+			if gvintyk:
+				gvintyk.talk(rig.cam.global_position)
+				audio.play_at("robot_beep", gvintyk, -4.0)
 		"girl_talk":
 			if girl:
 				girl.talk(rig.cam.global_position)
