@@ -1607,6 +1607,40 @@ func _follow_later(who: Node3D) -> void:
 	cam_follow = who
 
 
+var farm_folk: Array = []
+
+
+func _spawn_farm_folk() -> void:
+	## Комбайнер Василь порається біля комбайна, тракторист Саня — біля трактора (під навісом на фермі).
+	var o = world.outer
+	var list := [
+		["vasyl", 1.75, o.COMBINE_POS, [Vector3(-127.8, 0, 38.0), Vector3(-128.2, 0, 41.5), Vector3(-130.0, 0, 35.0)],
+			["Я — Василь, комбайнер. Мій комбайн — найкращий у районі!", "Жнива скоро — треба все підкрутити й змастити.",
+			 "Не підходь близько до жатки — там ножі гострі!", "Як зерно визріє — поїдемо косити пшеницю."]],
+		["sanya", 1.72, o.SHED, [Vector3(-127.8, 0, 45.0), Vector3(-127.5, 0, 48.5), Vector3(-128.5, 0, 52.5)],
+			["Привіт! Я Саня, тракторист.", "Трактор у мене — звір! Зараз масло поміняю.",
+			 "Завтра поле орати — треба плуг перевірити.", "Без трактора на фермі — як без рук!"]],
+	]
+	for e in list:
+		if not Models.exists(e[0]):
+			continue
+		var n = preload("res://scripts/npc.gd").new()
+		n.name = String(e[0]).capitalize()
+		n.main = self
+		world.yard_root.add_child(n)
+		var spots: Array = e[3]
+		n.position = spots[0]
+		n.setup(e[0], e[1], {"walk": ["walking"], "run": ["running"], "talk": ["talk"]}, ["walk", "run"], e[4], spots, "npc")
+		Models.give_nika_anims(n.ap, n.anims)
+		n.bounds = Rect2(o.SHED_ROOF.position - Vector2(8, 8), o.SHED_ROOF.size + Vector2(16, 16))
+		n.extra_obs = Obstacles.outer
+		n.make_idle_from("walk")
+		n.setup_pose()
+		n.play("idle")
+		n.face(e[2])
+		farm_folk.append(n)
+
+
 func _spawn_farm_extras() -> void:
 	var o = world.outer
 	if Models.exists("tractor"):
@@ -1620,6 +1654,7 @@ func _spawn_farm_extras() -> void:
 			trailer.setup(o.TRAILER_PARK, o.SHED_YAW)
 		_make_tractor_shed(o.SHED_ROOF)
 		grandpa.tractor = tractor
+	_spawn_farm_folk()
 	orchard = preload("res://scripts/orchard.gd").new()
 	world.yard_root.add_child(orchard)
 	orchard.build()
@@ -4585,7 +4620,13 @@ func _seller_dict(node, area) -> Dictionary:
 
 func _shop_open(sd: Dictionary) -> void:
 	var bz = world.outer.bazaar
-	if bz == null or sd.is_empty() or not sd.has("shop"):
+	if bz == null or sd.is_empty():
+		return
+	if not sd.has("shop"):
+		sd["greet_t"] = Time.get_ticks_msec() / 1000.0
+		_girl_face(sd["pos"])
+		var ls: Array = sd.get("lines", [])
+		bz.seller_say(sd["node"], String(ls[randi() % ls.size()]) if not ls.is_empty() else "")
 		return
 	_shop = sd
 	sd["greet_t"] = Time.get_ticks_msec() / 1000.0
@@ -4600,7 +4641,8 @@ func _shop_open(sd: Dictionary) -> void:
 		items.append(["sh_%d" % i, "%s — %d мон." % [goods[i][0], goods[i][1]], cols[i % cols.size()]])
 	if cat == "tools" and bz.tack_holder != null and not bz.tack_sold:
 		items.append(["sh_tack", "Сідло й вуздечка — %d мон." % TACK_PRICE, Color(0.55, 0.4, 0.25)])
-	var title: String = {"sausage": "Ковбаси й сало", "tools": "Інструменти", "sweets": "Солодощі", "bread": "Хліб", "fruit": "Фрукти"}.get(cat, "Ларьок")
+	var title: String = {"sausage": "Ковбаси й сало", "tools": "Інструменти", "sweets": "Солодощі", "bread": "Хліб", "fruit": "Фрукти",
+		"herbs": "Трави", "fish": "Риба", "honey": "Мед"}.get(cat, "Ларьок")
 	hud.show_choice("%s — у тебе %d мон." % [title, int(Game.state["coins"])], items, Color(0.85, 0.55, 0.2))
 
 

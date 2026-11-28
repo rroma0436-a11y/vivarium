@@ -34,6 +34,14 @@ const SELLERS := [
 	["bz_seller_bread", Vector2(18.5, -0.2), "Свіжий хліб, тільки з печі!", "bread"],
 	["bz_seller_girl", Vector2(9.5, -6.12), "Яблучка, груші, сливи — солоденькі!", "fruit"],
 ]
+# продавці-моделі з Meshy (assets/models/<id>.glb): id, ларьок (Blender x, y), зріст, слова, товар
+const FOLK_SELLERS := [
+	["verka", Vector2(5.0, -6.12), 1.6, "Трави лікувальні — ромашка, м'ята, чебрець!", "herbs"],
+	["vakula", Vector2(23.0, -0.2), 1.8, "Риба свіжа, щойно з річки!", "fish"],
+	["tymofii", Vector2(18.5, -6.12), 1.7, "Мед липовий і гречаний — з власної пасіки!", "honey"],
+]
+const PRIEST_LINES := ["Мир вам! Заходь, дитино, тут завжди раді.", "Добрі справи роби щодня — і на душі буде світло.",
+	"У неділю приходь на службу з дідусем і бабусею!", "Бережи рідних і допомагай їм — то найкраща молитва."]
 # товар кожного продавця: [назва, ціна, що це (Util.thing)]
 const GOODS := {
 	"sausage": [["Ковбаса домашня", 10, "sausage"], ["Сало", 8, "salo"], ["Шинка", 12, "ham"]],
@@ -41,6 +49,9 @@ const GOODS := {
 	"sweets": [["Льодяник", 2, "candy"], ["Пряник", 3, "gingerbread"], ["Цукерки", 4, "sweets"]],
 	"bread": [["Паляниця", 4, "bread"], ["Батон", 3, "baton"], ["Булочка", 2, "bun"]],
 	"fruit": [["Яблука", 3, "apple"], ["Груші", 3, "pear"], ["Сливи", 2, "plum"]],
+	"herbs": [["Ромашка", 2, "chamomile"], ["М'ята", 2, "mint"], ["Чебрець", 3, "thyme"]],
+	"fish": [["Короп", 12, "carp"], ["Щука", 15, "pike"], ["Тараня", 6, "taranya"]],
+	"honey": [["Банка меду", 10, "honey"], ["Медові соти", 8, "honeycomb"]],
 }
 const SHOP_ASK := {
 	"sausage": "Добрий день, Ніко! Ковбаски, сальця чи шинки?",
@@ -48,6 +59,9 @@ const SHOP_ASK := {
 	"sweets": "Солоденького хочеш? Льодяники, пряники!",
 	"bread": "Свіжий хліб! Паляницю чи булочку?",
 	"fruit": "Яблучка, груші, сливи — вибирай!",
+	"herbs": "Яку травичку тобі? Ромашку, м'яту чи чебрець?",
+	"fish": "Коропа, щуку чи тараньки?",
+	"honey": "Медку? Баночку чи соти?",
 }
 const SELLER_FILE_POS := {"bz_seller_bread": Vector2(18.5, -0.2), "bz_seller_m1": Vector2(9.5, -0.2),
 	"bz_seller_w2": Vector2(14.0, -0.2), "bz_seller_girl": Vector2(9.5, -6.12)}
@@ -107,6 +121,13 @@ func build() -> void:
 			sd["shop"] = s[3]
 			var at: Vector2 = s[1]
 			sd["front"] = to_world(at.x, at.y + (-1.75 if at.y > -3.0 else 1.75))     # де стати покупцеві (у проході)
+			sd["greet_t"] = 0.0
+	for s in FOLK_SELLERS:
+		var at: Vector2 = s[1]
+		var sd := _add_folk(s[0], root, Vector3(at.x, 0, -at.y), 0.0 if at.y > -3.0 else PI, s[2], s[3])
+		if not sd.is_empty():
+			sd["shop"] = s[4]
+			sd["front"] = to_world(at.x, at.y + (-1.75 if at.y > -3.0 else 1.75))
 			sd["greet_t"] = 0.0
 	_tack_stall()
 	_make_village_huts()
@@ -245,6 +266,55 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 		"rich": ap != null and ap.has_animation("Give"), "next": randf_range(4.0, 8.0)})
 
 
+func _add_folk(id: String, parent: Node3D, at: Vector3, yaw: float, height: float, words: String) -> Dictionary:
+	## Мешканець-модель із Meshy (assets/models/<id>.glb), що стоїть на своєму місці: продавець у ларьку чи священник у церкві.
+	var holder := Models.spawn(parent, id, height)
+	if holder == null:
+		return {}
+	holder.position = at
+	holder.rotation.y = yaw
+	var m: Node3D = holder.get_meta("model")
+	var ap := Models.anim_player(m)
+	var anims := {}
+	var idle := ""
+	if ap:
+		Models.give_nika_anims(ap, anims)
+		idle = Models.find_anim(ap, ["idle_0", "idle"])
+		if idle == "":
+			idle = String(Models.share_anims(ap, "girl", {"idle": "idle_15"}).get("idle", ""))
+		if idle != "":
+			Models.set_loop(ap, [idle])
+			ap.play(idle)
+			ap.seek(randf() * ap.get_animation(idle).length, true)
+	var pick := Util.pick_area("bz_seller", Vector3(0.9, 1.8, 0.9), Vector3(0, 0.9, 0))
+	pick.set_meta("words", words)
+	holder.add_child(pick)
+	var lb := Label3D.new()
+	lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lb.font_size = 44
+	lb.outline_size = 10
+	lb.modulate = Color(1, 0.98, 0.9)
+	lb.outline_modulate = Color(0.25, 0.12, 0.3)
+	lb.width = 520.0
+	lb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lb.pixel_size = 0.004
+	lb.position = Vector3(0, height + 0.4, 0)
+	lb.visible = false
+	lb.no_depth_test = true
+	holder.add_child(lb)
+	var cyl := CollisionShape3D.new()
+	var cs := CylinderShape3D.new()
+	cs.radius = 0.22
+	cs.height = 1.6
+	cyl.shape = cs
+	walls.add_child(cyl)
+	cyl.global_position = holder.global_position + Vector3(0, 0.8, 0)
+	var sd := {"node": holder, "ap": ap, "model": m, "pos": holder.global_position, "label": lb, "left": 0.0, "words": words,
+		"rich": false, "next": 0.0, "idle": idle, "talk": String(anims.get("talk", "")), "voice": id}
+	sellers.append(sd)
+	return sd
+
+
 func seller_say(holder: Node, text := "") -> void:
 	for s in sellers:
 		if s["node"] == holder:
@@ -256,6 +326,10 @@ func seller_say(holder: Node, text := "") -> void:
 				var ap: AnimationPlayer = s["ap"]
 				ap.play("Give" if randf() < 0.6 else "Wave", 0.25)
 				s["next"] = randf_range(6.0, 10.0)
+			elif String(s.get("talk", "")) != "" and s["ap"]:
+				(s["ap"] as AnimationPlayer).play(s["talk"], 0.25)
+			if s.has("voice"):
+				Util.speak(s["node"], s["voice"], lb.text)
 
 
 # ------------------------------------------------------------------ сітки: видимість, тіні
@@ -722,6 +796,8 @@ func step(delta: float, who: Array, cam: Vector3, me := Vector3.INF) -> void:
 	for s in sellers:
 		if s["rich"] and (s["model"] as Node3D).visible:
 			_seller_life(s, delta)
+		elif String(s.get("idle", "")) != "" and s["ap"] and not (s["ap"] as AnimationPlayer).is_playing():
+			(s["ap"] as AnimationPlayer).play(s["idle"], 0.3)
 		if s["left"] > 0.0:
 			s["left"] = float(s["left"]) - delta
 			if s["left"] <= 0.0:
@@ -1513,6 +1589,10 @@ func _church_extras(ch: Node3D, b: Dictionary) -> void:
 				_solid(mi, true)
 	_church_fence(ch)
 	_church_trees(ch)
+	var sd := _add_folk("pavlo", ch, Vector3(0, CHURCH_FLOOR, -0.1), 0.0, 1.78, PRIEST_LINES[0])
+	if not sd.is_empty():
+		sd["front"] = ch.global_transform * Vector3(0, 0, 1.3)
+		sd["lines"] = PRIEST_LINES
 
 
 func _fence_mats() -> Dictionary:

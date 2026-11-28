@@ -324,8 +324,11 @@ static func bridge_y(p: Vector3) -> float:
 const THING_NAMES := {"cup": "кухоль узвару", "apple": "яблучко", "pear": "грушу", "plum": "сливи", "bun": "булочку", "pie": "пиріжок",
 	"bread": "паляницю", "baton": "батон", "sausage": "ковбаску", "salo": "сальце", "ham": "шинку", "candy": "льодяник",
 	"gingerbread": "пряник", "sweets": "цукерки", "milk": "молоко", "axe": "сокиру", "hammer": "молоток", "rake": "граблі",
-	"shovel": "лопату", "fork": "вила", "hoe": "сапу", "broom": "мітлу", "jug": "глечик"}
-const FOOD := ["cup", "apple", "pear", "plum", "bun", "pie", "bread", "baton", "sausage", "salo", "ham", "candy", "gingerbread", "sweets", "milk"]
+	"shovel": "лопату", "fork": "вила", "hoe": "сапу", "broom": "мітлу", "jug": "глечик",
+	"honey": "баночку меду", "honeycomb": "медові соти", "carp": "коропа", "pike": "щуку", "taranya": "тараньку",
+	"chamomile": "ромашку", "mint": "м'яту", "thyme": "чебрець"}
+const FOOD := ["cup", "apple", "pear", "plum", "bun", "pie", "bread", "baton", "sausage", "salo", "ham", "candy", "gingerbread", "sweets", "milk",
+	"honey", "honeycomb", "carp", "pike", "taranya", "chamomile", "mint", "thyme"]
 
 
 static func make_takeable(n: Node3D, kind := "prop", max_size := 0.9) -> bool:
@@ -387,6 +390,22 @@ static func thing(kind: String) -> Node3D:
 				n.add_child(cyl(0.045, 0.04, 0.1, mat(Color(0.75, 0.45, 0.25), 0.6), Vector3(0, 0.05, 0)))
 		"milk":
 			n.add_child(cyl(0.05, 0.06, 0.18, mat(Color(0.95, 0.95, 0.92), 0.5), Vector3(0, 0.09, 0)))
+		"honey":
+			n.add_child(cyl(0.045, 0.045, 0.1, mat(Color(0.95, 0.62, 0.1), 0.25), Vector3(0, 0.05, 0)))
+			n.add_child(cyl(0.048, 0.048, 0.02, mat(Color(0.85, 0.85, 0.8), 0.5), Vector3(0, 0.11, 0)))
+		"honeycomb":
+			n.add_child(box(Vector3(0.14, 0.03, 0.1), mat(Color(0.95, 0.7, 0.15), 0.3), Vector3(0, 0.015, 0)))
+		"carp", "pike", "taranya":
+			var fc: Color = {"carp": Color(0.72, 0.6, 0.3), "pike": Color(0.45, 0.55, 0.35), "taranya": Color(0.75, 0.6, 0.4)}[kind]
+			var fl: float = {"carp": 0.24, "pike": 0.32, "taranya": 0.16}[kind]
+			n.add_child(sphere(fl * 0.5, mat(fc, 0.35), Vector3(0, 0.035, 0), Vector3(1, 0.3, 0.18)))
+			n.add_child(box(Vector3(0.05, 0.06, 0.01), mat(fc.darkened(0.2), 0.4), Vector3(-fl * 0.55, 0.035, 0)))
+			sz = Vector3(fl + 0.06, 0.08, 0.08)
+		"chamomile", "mint", "thyme":
+			var top: Color = {"chamomile": Color(0.97, 0.97, 0.9), "mint": Color(0.3, 0.65, 0.3), "thyme": Color(0.7, 0.5, 0.75)}[kind]
+			n.add_child(cyl(0.02, 0.012, 0.16, mat(Color(0.35, 0.55, 0.25), 0.8), Vector3(0, 0.08, 0)))
+			n.add_child(sphere(0.045, mat(top, 0.7), Vector3(0, 0.17, 0), Vector3(1, 0.8, 1)))
+			sz = Vector3(0.1, 0.22, 0.1)
 		"apple", "pear", "plum":
 			var col: Color = {"apple": Color(0.85, 0.18, 0.12), "pear": Color(0.8, 0.78, 0.25), "plum": Color(0.35, 0.15, 0.45)}[kind]
 			var k := 3 if kind != "apple" else 2
@@ -461,6 +480,8 @@ const VOICES := {
 	"grandpa": ["m", 0.8, 0.85], "shepherd": ["m", 0.95, 0.95], "groom": ["m", 0.88, 1.0], "student": ["m", 1.1, 1.05],
 	"kid": ["m", 1.35, 1.15], "robot_kid": ["m", 1.7, 1.2], "beep": ["m", 1.9, 1.25],
 	"granny": ["f", 0.9, 0.88], "girl": ["f", 1.3, 1.05],
+	"verka": ["f", 0.85, 0.9], "vasyl": ["m", 0.9, 1.0], "vakula": ["m", 0.8, 0.95], "sanya": ["m", 1.0, 1.05],
+	"tymofii": ["m", 0.85, 0.9], "pavlo": ["m", 0.75, 0.85],
 	"timko": ["m", 1.3, 1.1], "stopa": ["m", 1.2, 1.05], "karli": ["f", 1.3, 1.05],
 }
 const VOICE_NEAR := 25.0                 # далі від камери — не чути
