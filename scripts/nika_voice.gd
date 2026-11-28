@@ -208,6 +208,9 @@ static func play(text: String, prefix := false) -> bool:
 	var a = AudioScript.inst
 	if a == null or not is_instance_valid(a):
 		return false
+	var h = a.get_parent().get("hero") if a.get_parent() else null
+	if h != null and String(h) not in ["girl", "karli"]:
+		return false
 	var ids := ids_for(text, prefix)
 	if ids.is_empty():
 		return false

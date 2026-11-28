@@ -21,6 +21,9 @@ const BAZAAR_SPOTS := [Vector3(-0.9, 0, 191.5), Vector3(0.9, 0, 187.0), Vector3(
 const SQUARE := [Vector3(-4.5, 0, 55.5), Vector3(4.5, 0, 55.0), Vector3(-5.0, 0, 64.5), Vector3(4.0, 0, 65.0)]
 
 
+const HERO_SHARE := {"idle": "idle_15", "skip": "skip", "jump": "happy_jump", "sit": "sit_cross", "wag": "finger_wag", "turn": "idle_turn"}
+
+
 func setup_girl(_unused = null) -> void:
 	setup(main.hero, {"granny": 1.6, "grandpa": 1.72, "shepherd": 1.7, "groom": 1.78, "kid": 1.15, "robot_kid": 0.9}.get(main.hero, 1.0), {"idle": ["idle_15", "idle"], "walk": ["walking"], "run": ["running"], "skip": ["skip"],
 			"talk": ["talk"], "jump": ["happy_jump", "jump"], "sit": ["sit_cross"], "stand": ["sit_to_stand"],
@@ -40,6 +43,14 @@ func setup_girl(_unused = null) -> void:
 	run_speed = 2.2
 	if main.hero != "girl":
 		Models.give_nika_anims(ap, anims)
+		var more := {}
+		for r in HERO_SHARE:
+			if String(anims.get(r, "")) == "":
+				more[r] = HERO_SHARE[r]
+		var got := Models.share_anims(ap, "girl", more)
+		for r in got:
+			anims[r] = got[r]
+		Models.set_loop(ap, [anims.get("idle", ""), anims.get("skip", ""), anims.get("sit", "")])
 	_make_idle()
 	setup_pose()
 

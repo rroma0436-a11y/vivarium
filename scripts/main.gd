@@ -52,8 +52,14 @@ var kibble: Node3D
 var _shot := ""
 var _demo := ""
 var hero := "girl"
-const HEROES := [["girl", "Ніка", "girl"], ["granny", "Бабуся Галя", "granny"], ["grandpa", "Дідусь Петро", "grandpa"],
-	["shepherd", "Пастух Іван", "shepherd"], ["groom", "Конюх Семен", "groom"], ["kid", "Тарасик", "kid"], ["robot_kid", "Гвинтик", "gvintyk"]]
+const HEROES := [["girl", "Ніка", "girl"], ["timko", "Тимко", "timko"], ["karli", "Карлі", "karli"], ["stopa", "Стьопа", "stopa"]]
+
+
+func hero_name() -> String:
+	for h in HEROES:
+		if h[0] == hero:
+			return h[1]
+	return "Ніка"
 var _frames := 0
 var _greeted := false
 var _track: Node3D
@@ -1926,7 +1932,7 @@ func _show_nika_menu() -> void:
 		"nk_basket_take": not girl.has_basket(), "nk_basket_put": girl.has_basket(),
 		"nk_put": holding, "nk_eat": holding and String(girl.item_kind) in Util.FOOD,
 		"nk_horse": _near_saddle_horse() != null,
-		"nk_jump": hero == "girl",
+		"nk_jump": girl.anims.get("jump", "") != "",
 	}
 	hud.show_nika_menu(flags)
 

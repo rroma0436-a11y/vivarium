@@ -461,6 +461,7 @@ const VOICES := {
 	"grandpa": ["m", 0.8, 0.85], "shepherd": ["m", 0.95, 0.95], "groom": ["m", 0.88, 1.0], "student": ["m", 1.1, 1.05],
 	"kid": ["m", 1.35, 1.15], "robot_kid": ["m", 1.7, 1.2], "beep": ["m", 1.9, 1.25],
 	"granny": ["f", 0.9, 0.88], "girl": ["f", 1.3, 1.05],
+	"timko": ["m", 1.3, 1.1], "stopa": ["m", 1.2, 1.05], "karli": ["f", 1.3, 1.05],
 }
 const VOICE_NEAR := 25.0                 # далі від камери — не чути
 static var _tts := {}                    # {"m": id, "f": id, "two": чи є окремий чоловічий голос}
@@ -513,7 +514,7 @@ static func speak(who: Node3D, id: String, text: String) -> void:
 	var cam := who.get_viewport().get_camera_3d()
 	if cam == null or cam.global_position.distance_to(who.global_position) > VOICE_NEAR:
 		return
-	if id == "girl":
+	if id == "girl" or id == "karli":
 		preload("res://scripts/nika_voice.gd").play(text, true)      # Ніка — записаним голосом
 		return
 	if _tts.is_empty():

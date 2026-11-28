@@ -287,6 +287,14 @@ func show_dialog(who: String, text: String, portrait: Texture2D = null, then := 
 		_dialog_queue.append([who, text, portrait, then])
 		return
 	if who == "Ніка":
+		var m = get_tree().current_scene
+		if m and m.get("hero") != null and m.hero != "girl":
+			who = m.hero_name()
+			var ic := "res://assets/ui/%s.png" % m.hero
+			if ResourceLoader.exists(ic):
+				portrait = load(ic)
+			if m.hero != "karli" and m.get("girl"):
+				Util.speak(m.girl, m.hero, text)
 		preload("res://scripts/nika_voice.gd").play(text, true)
 	dialog_name.text = who
 	dialog_text.text = text
