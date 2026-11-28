@@ -20,6 +20,7 @@ var dragon
 var plane
 var tractor
 var trailer                             # причіп-самоскид до трактора (trailer.gd)
+var sanya                               # тракторист Саня (sanya.gd)
 var orchard
 var forest
 var hit_area: Node
@@ -495,6 +496,10 @@ func _watch_doors(dt: float) -> void:
 				_hand_open.erase(g)
 		if _mount and _mount_state == "ride":
 			mv.append(_mount.global_position)
+	if tractor and tractor.state != "parked":
+		mv.append(tractor.global_position)                  # ворота ферми відчиняються перед трактором і причепом
+		if tractor.trailer:
+			mv.append((tractor.trailer as Node3D).global_position)
 	world.door_watch(mv, _door_acc)
 	_door_acc = 0.0
 
@@ -831,6 +836,11 @@ func _tap_object(kind: String) -> void:
 				hud.show_kid_menu(false)      # будь-яку нову справу можна замовити й під час іншої
 			elif best and best == gvintyk and qid == "eggs" and gvintyk.doing == "":
 				gvintyk.command("eggs")
+			elif best and best == sanya:
+				audio.play_at("question", best, -4.0)
+				if best.doing == "" and not best.moving and best.get("riding") == null:
+					best.face(rig.cam.global_position)
+				hud.show_worker_menu("sanya")
 			elif best and best in [gvintyk, shepherd, groom]:
 				audio.play_at("robot_beep" if best == gvintyk else "question", best, -4.0)
 				if best.doing == "" and not best.moving and best.get("riding") == null:
@@ -1061,6 +1071,13 @@ func _on_action(name: String) -> void:
 		"gv_talk":
 			if gvintyk:
 				gvintyk.talk_nika()
+		"sn_talk":
+			if sanya:
+				sanya.talk_nika()
+		"sn_plow", "sn_wheat", "sn_grandpa", "sn_mill":
+			if sanya:
+				sanya.command({"sn_plow": "plow", "sn_wheat": "wheat", "sn_grandpa": "grandpa", "sn_mill": "mill"}[name])
+				_follow_later(sanya)
 		"girl_talk":
 			if girl:
 				girl.talk(rig.cam.global_position)
@@ -1624,7 +1641,7 @@ func _spawn_farm_folk() -> void:
 	for e in list:
 		if not Models.exists(e[0]):
 			continue
-		var n = preload("res://scripts/npc.gd").new()
+		var n = preload("res://scripts/sanya.gd").new() if e[0] == "sanya" else preload("res://scripts/npc.gd").new()
 		n.name = String(e[0]).capitalize()
 		n.main = self
 		world.yard_root.add_child(n)
@@ -1639,6 +1656,10 @@ func _spawn_farm_folk() -> void:
 		n.play("idle")
 		n.face(e[2])
 		farm_folk.append(n)
+		if e[0] == "sanya":
+			sanya = n
+			n.tractor = tractor
+			n.trailer = trailer
 
 
 func _spawn_farm_extras() -> void:
@@ -1648,6 +1669,10 @@ func _spawn_farm_extras() -> void:
 		world.yard_root.add_child(tractor)
 		tractor.setup(o.SHED, o.SHED_YAW, o.PLOW_FIELD)
 		tractor.make_field(world.yard_root)
+		var wf: Node3D = tractor.make_field(world.yard_root, o.WHEAT_PLOW)       # пшеничне поле після обмолоту (оре Саня)
+		var ripe := str(Game.state.get("wheat_n", "ripe")) == "ripe"
+		wf.visible = not ripe
+		o.set_wheat_ripe(ripe)
 		if Models.exists("trailer"):
 			trailer = preload("res://scripts/trailer.gd").new()
 			world.yard_root.add_child(trailer)

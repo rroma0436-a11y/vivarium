@@ -65,6 +65,8 @@ func build(w) -> void:
 	_make_field_road()
 	_make_east_road()
 	_make_mill()
+	_make_grain_bunker()
+	_make_mill_bin()
 	_make_forest(rng)
 	_make_meadow(rng)
 	_make_airfield()
@@ -2549,6 +2551,138 @@ static func apply_view_ranges(root: Node, max_size := 14.0, near := 60.0) -> voi
 		mi.visibility_range_end = clampf(near + dim * 10.0, near, 170.0)
 		mi.visibility_range_end_margin = 8.0
 		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+
+
+# ------------------------------------------------------------------ бункер для зерна на фермі й засік біля млина
+const WHEAT_PLOW := Rect2(-27.0, -104.5, 14.5, 33.5)  # східна частина пшеничного поля (за дорогою) — її оре тракторист після обмолоту
+const BUNKER := Vector3(-152.5, 0, 43.2)              # бункер на ніжках (на захід від навісу), жолоб — на південь, до проїзду
+const BUNKER_SPOUT := Vector3(-152.5, 3.2, 46.8)      # кінець жолоба над проїздом (z = 46.8): сюди підставляють причіп
+const BUNKER_PIT := Vector3(-146.5, 0, 46.8)          # приймальна яма з ґраткою на проїзді: сюди висипають зерно з причепа
+const MILL_BIN_SIDE := 5.2                             # засік — збоку млина (від осі дороги вбік), трохи нижче за схилом
+const MILL_BIN_ALONG := 1.0
+var bunker_stream: CPUParticles3D
+var mill_bin_grain: MeshInstance3D
+
+
+func mill_dirs() -> Array:
+	## [центр пагорба, униз уздовж дороги, убік (до засіку)].
+	var c := Vector3(MILL_HILL.x, 0, MILL_HILL.z)
+	var dv := Vector3(MILL_DIR.x, 0, MILL_DIR.y)
+	return [c, dv, Vector3(dv.z, 0, -dv.x)]
+
+
+func mill_bin_pos() -> Vector3:
+	var m := mill_dirs()
+	var p: Vector3 = m[0] + m[2] * MILL_BIN_SIDE + m[1] * MILL_BIN_ALONG
+	p.y = Util.hill_y(p)
+	return p
+
+
+func _make_grain_bunker() -> void:
+	## Металевий бункер на чотирьох ніжках: знизу лійка й похилий жолоб над проїздом (набирати зерно в причіп),
+	## збоку — ківшовий підйомник від приймальної ями з ґраткою (висипати зерно з причепа).
+	var n := Node3D.new()
+	n.name = "GrainBunker"
+	add_child(n)
+	var metal := Util.mat(Color(0.66, 0.68, 0.7), 0.45, 0.6)
+	var dark := Util.mat(Color(0.32, 0.34, 0.36), 0.6, 0.5)
+	var rust := Util.mat(Color(0.55, 0.32, 0.2), 0.8)
+	var b := BUNKER
+	var leg_h := 4.6
+	for sx in [-1.2, 1.2]:
+		for sz in [-1.2, 1.2]:
+			n.add_child(Util.box(Vector3(0.2, leg_h, 0.2), dark, b + Vector3(sx, leg_h * 0.5, sz)))
+			Obstacles.add_outer(b.x + sx, b.z + sz, 0.3, leg_h)
+	# розпірки між ніжками
+	for sz in [-1.2, 1.2]:
+		n.add_child(Util.box(Vector3(2.4, 0.12, 0.12), dark, b + Vector3(0, 1.6, sz)))
+	for sx in [-1.2, 1.2]:
+		n.add_child(Util.box(Vector3(0.12, 0.12, 2.4), dark, b + Vector3(sx, 1.6, 0)))
+	n.add_child(Util.cyl(1.45, 0.28, 1.2, metal, b + Vector3(0, 4.4, 0)))           # лійка
+	n.add_child(Util.cyl(1.45, 1.45, 3.0, metal, b + Vector3(0, 6.5, 0)))           # корпус
+	n.add_child(Util.cyl(0.12, 1.6, 0.9, rust, b + Vector3(0, 8.45, 0)))            # дашок
+	for y in [5.2, 6.5, 7.8]:
+		n.add_child(Util.cyl(1.48, 1.48, 0.06, dark, b + Vector3(0, y, 0)))         # обручі
+	# похилий жолоб від лійки до проїзду, на кінці — коротка труба донизу
+	var a := b + Vector3(0, 3.8, 0)
+	var e := BUNKER_SPOUT + Vector3(0, 0.25, 0)
+	var dz := e.z - a.z
+	var dy := a.y - e.y
+	var ln := sqrt(dz * dz + dy * dy)
+	n.add_child(Util.box(Vector3(0.42, 0.1, ln), dark, (a + e) * 0.5, Vector3(atan2(dy, dz), 0, 0)))
+	for sx in [-0.21, 0.21]:
+		n.add_child(Util.box(Vector3(0.04, 0.22, ln), dark, (a + e) * 0.5 + Vector3(sx, 0.1, 0), Vector3(atan2(dy, dz), 0, 0)))
+	n.add_child(Util.cyl(0.14, 0.14, 0.45, dark, BUNKER_SPOUT + Vector3(0, 0.1, 0)))
+	bunker_stream = Util.grain_stream()
+	bunker_stream.position = BUNKER_SPOUT - Vector3(0, 0.15, 0)
+	n.add_child(bunker_stream)
+	# ківшовий підйомник збоку бункера (від ями — під землею) і труба зверху в бункер
+	var ex := b + Vector3(1.95, 0, 0)
+	n.add_child(Util.box(Vector3(0.5, 9.2, 0.5), metal, ex + Vector3(0, 4.6, 0)))
+	n.add_child(Util.box(Vector3(0.7, 0.6, 0.7), dark, ex + Vector3(0, 9.4, 0)))
+	n.add_child(Util.box(Vector3(1.9, 0.25, 0.25), dark, b + Vector3(1.0, 8.95, 0), Vector3(0, 0, -0.25)))
+	n.add_child(Util.box(Vector3(0.9, 0.8, 0.9), dark, ex + Vector3(0, 0.4, 0)))     # мотор підйомника
+	Obstacles.add_outer(ex.x, ex.z, 0.6, 9.0)
+	# приймальна яма: бетонна обв'язка й темна ґратка (по ній можна проїхати)
+	var conc := Util.mat(Color(0.6, 0.6, 0.57), 0.95)
+	var grate := Util.mat(Color(0.18, 0.18, 0.19), 0.7, 0.5)
+	var pit := BUNKER_PIT
+	for e2 in [[Vector3(0, 0.05, -1.3), Vector3(2.8, 0.1, 0.2)], [Vector3(0, 0.05, 1.3), Vector3(2.8, 0.1, 0.2)],
+			[Vector3(-1.3, 0.05, 0), Vector3(0.2, 0.1, 2.4)], [Vector3(1.3, 0.05, 0), Vector3(0.2, 0.1, 2.4)]]:
+		var c := Util.box(e2[1], conc, pit + (e2[0] as Vector3))
+		c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(c)
+	var g := Util.box(Vector3(2.4, 0.04, 2.4), grate, pit + Vector3(0, 0.03, 0))
+	g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(g)
+	for k in 7:
+		var bar := Util.box(Vector3(0.06, 0.05, 2.4), conc, pit + Vector3(-1.05 + k * 0.35, 0.06, 0))
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(bar)
+	houses.append([b.x, b.z])
+
+
+func _make_mill_bin() -> void:
+	## Дерев'яний засік збоку млина: відкритий зверху ящик, куди тракторист висипає зерно з причепа.
+	var m := mill_dirs()
+	var p := mill_bin_pos()
+	var n := Node3D.new()
+	n.name = "MillBin"
+	add_child(n)
+	n.position = p
+	n.rotation.y = atan2(m[1].x, m[1].z)
+	var wood := Util.mat(Color(0.52, 0.36, 0.22), 0.9)
+	var dark := Util.mat(Color(0.38, 0.26, 0.16), 0.9)
+	var w := 2.4
+	var h := 1.0
+	for e in [[Vector3(0, h * 0.5, -w * 0.5), Vector3(w, h, 0.1)], [Vector3(0, h * 0.225, w * 0.5), Vector3(w, h * 0.45, 0.1)],
+			[Vector3(-w * 0.5, h * 0.5, 0), Vector3(0.1, h, w)], [Vector3(w * 0.5, h * 0.5, 0), Vector3(0.1, h, w)]]:
+		n.add_child(Util.box(e[1], wood, e[0]))
+	n.add_child(Util.box(Vector3(w, 0.08, w), dark, Vector3(0, 0.04, 0)))
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			n.add_child(Util.box(Vector3(0.14, h + 0.25, 0.14), dark, Vector3(sx * w * 0.5, (h + 0.25) * 0.5 - 0.15, sz * w * 0.5)))
+	# зерно в засіку (підіймається з кожним привезеним причепом)
+	mill_bin_grain = Util.box(Vector3(w - 0.14, 1.0, w - 0.14), Util.mat(Color(0.84, 0.66, 0.3), 0.95), Vector3(0, 0.5, 0))
+	n.add_child(mill_bin_grain)
+	set_mill_bin(0)
+	Obstacles.add_outer(p.x, p.z, 1.5, h)
+
+
+func set_mill_bin(loads: int) -> void:
+	if mill_bin_grain == null:
+		return
+	var k := clampf(loads / 4.0, 0.0, 1.0)
+	mill_bin_grain.visible = loads > 0
+	mill_bin_grain.scale.y = maxf(0.05, 0.38 * k)
+	mill_bin_grain.position.y = 0.08 + mill_bin_grain.scale.y * 0.5
+
+
+func set_wheat_ripe(on: bool) -> void:
+	## Пшениця на полі: стоїть (on) чи вже скошена комбайном.
+	var f := get_node_or_null("WheatField")
+	if f:
+		f.visible = on
 
 
 # ------------------------------------------------------------------ комбайн біля пшеничного поля (Комбайн.blend)

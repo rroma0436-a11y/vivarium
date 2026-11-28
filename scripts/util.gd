@@ -553,3 +553,25 @@ static func speak(who: Node3D, id: String, text: String) -> void:
 		pitch *= 0.75                      # чоловічого голосу нема — нижче жіночий
 	var line := text.replace("z-z-z", "").replace("…", ", ")
 	DisplayServer.tts_speak(line, String(_tts[g]), 80, pitch, float(v[2]), 0, true)
+
+
+static func grain_stream() -> CPUParticles3D:
+	## Струмінь зерна (з комбайна, бункера чи причепа): золотисті зернинки падають униз.
+	var p := CPUParticles3D.new()
+	p.amount = 90
+	p.lifetime = 0.9
+	p.direction = Vector3(0, -1, 0)
+	p.spread = 9.0
+	p.initial_velocity_min = 0.6
+	p.initial_velocity_max = 1.2
+	p.gravity = Vector3(0, -9.0, 0)
+	p.scale_amount_min = 0.025
+	p.scale_amount_max = 0.05
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 0.1
+	var bm := BoxMesh.new()
+	bm.size = Vector3.ONE
+	bm.material = mat(Color(0.86, 0.68, 0.3), 0.85)
+	p.mesh = bm
+	p.emitting = false
+	return p

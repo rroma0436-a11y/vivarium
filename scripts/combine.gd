@@ -39,6 +39,11 @@ var _door_spd := 1.6
 var _handle := Vector3.INF                          # ручка дверей (у системі дверей)
 var speed := 0.0
 var reel_on := true
+var auger: Node3D                                   # вивантажувальний шнек (складений уздовж лівого боку, кінцем назад)
+var _auger_k := 0.0
+var _auger_want := 0.0
+var _stream: CPUParticles3D
+const SPOUT := Vector3(-5.6, 3.35, -1.2)            # кінець розвернутого шнека (у системі комбайна)
 
 
 func setup() -> bool:
@@ -60,7 +65,8 @@ func setup() -> bool:
 		var w := model.find_child(nm, true, false)
 		if w:
 			pivots_r.append(w)
-	for n in wheels_f + wheels_r + pivots_r + [door, reel]:
+	auger = model.find_child("Шнек", true, false)
+	for n in wheels_f + wheels_r + pivots_r + [door, reel, auger]:
 		if n:
 			_base[n] = (n as Node3D).transform
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
@@ -85,7 +91,25 @@ func setup() -> bool:
 	area = Util.pick_area("combine", Vector3(4.4, 4.4, 9.6), Vector3(0, 2.2, -0.6))
 	add_child(area)
 	add_child(Util.blob_shadow(3.2, 0.3))
+	_stream = Util.grain_stream()
+	_stream.position = SPOUT
+	add_child(_stream)
 	return true
+
+
+func auger_out(on: bool) -> void:
+	## Шнек розвертається вбік (до причепа) або складається назад.
+	_auger_want = 1.0 if on else 0.0
+
+
+func auger_ready() -> bool:
+	return auger == null or _auger_k > 0.98
+
+
+func pour(on: bool) -> void:
+	## Зерно сиплеться зі шнека.
+	if _stream:
+		_stream.emitting = on
 
 
 func solid(on: bool) -> void:
@@ -169,6 +193,11 @@ func ride_anim(v: float, steer_to: float, dt: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if auger and absf(_auger_k - _auger_want) > 0.001:
+		_auger_k = move_toward(_auger_k, _auger_want, delta * 0.45)
+		var ea := _auger_k * _auger_k * (3.0 - 2.0 * _auger_k)
+		var ba: Transform3D = _base[auger]
+		auger.transform = Transform3D(Basis(Vector3.UP, PI / 2.0 * ea) * ba.basis, ba.origin)
 	if reel:
 		# мотовило крутиться, коли комбайн їде (і поволі — коли стоїть із заведеним мотором)
 		if reel_on:

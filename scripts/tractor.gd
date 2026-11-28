@@ -211,8 +211,18 @@ func _engine_step() -> void:
 
 
 # ------------------------------------------------------------------ поле
-func make_field(parent: Node3D) -> void:
+var _fields: Array = []                         # поля під оранку: {rect, mask, tex, node, plowed}; 0 — поле за садком
+
+
+func make_field(parent: Node3D, r := Rect2()) -> Node3D:
 	## Земля під оранку: стерня, а де пройшов плуг — темні борозни (маска 64×64).
+	## r — інше поле (напр. пшеничне після обмолоту); без r — основне поле трактора.
+	var cur := _fields.size()
+	if r.has_area():
+		field = r
+	var root := Node3D.new()
+	parent.add_child(root)
+	parent = root
 	_mask = Image.create(MASK_N, MASK_N, false, Image.FORMAT_L8)
 	_mask.fill(Color(0, 0, 0))
 	_mask_tex = ImageTexture.create_from_image(_mask)
@@ -285,13 +295,41 @@ void fragment() {
 		var b := Util.box(e[1], edge, e[0])
 		b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		parent.add_child(b)
+	_fields.append({"rect": field, "mask": _mask, "tex": _mask_tex, "node": root, "plowed": 0.0})
+	plowed = 0.0
+	if cur > 0:
+		use_field(0)
+	return root
+
+
+func use_field(i: int) -> void:
+	## На якому полі оремо (і яке поле малює плуг).
+	if i < 0 or i >= _fields.size():
+		return
+	if _mask_dirty:
+		_mask_dirty = false
+		_mask_tex.update(_mask)
+	for f in _fields:
+		if f["mask"] == _mask:
+			f["plowed"] = plowed
+	var d: Dictionary = _fields[i]
+	field = d["rect"]
+	_mask = d["mask"]
+	_mask_tex = d["tex"]
+	plowed = float(d["plowed"])
+
+
+func field_node(i: int) -> Node3D:
+	return _fields[i]["node"] if i >= 0 and i < _fields.size() else null
 
 
 func reset_field() -> void:
 	if _mask == null:
 		return
-	_mask.fill(Color(0, 0, 0))
-	_mask_tex.update(_mask)
+	for f in _fields:
+		(f["mask"] as Image).fill(Color(0, 0, 0))
+		(f["tex"] as ImageTexture).update(f["mask"])
+		f["plowed"] = 0.0
 	plowed = 0.0
 
 
@@ -402,7 +440,10 @@ func _process(delta: float) -> void:
 	if digging:
 		_paint(plow_pos())
 	if trailer:
-		trailer.follow(hitch_global())
+		if trailer_rigid:
+			trailer.follow_rigid(hitch_global(), rotation.y, delta)
+		else:
+			trailer.follow(hitch_global())
 	_mask_t += delta
 	if _mask_dirty and _mask_t > 0.15:
 		_mask_t = 0.0
@@ -437,6 +478,7 @@ func _drive_to(p: Vector3, v: float, reach := 0.7) -> void:
 		speed = move_toward(speed, vv, dt * 1.8)
 		rotation.y += clampf(diff, -1.0, 1.0) * dt * speed / 1.9 * 1.6
 		global_position += Vector3(sin(rotation.y), 0, cos(rotation.y)) * speed * dt
+		global_position.y = Util.hill_y(global_position)            # на пагорб із млином — по схилу
 		# не їде крізь людей і тварин
 		var ppl := Vehicles.people()
 		if not ppl.is_empty():
@@ -525,6 +567,40 @@ func drive_route(points: Array, v := 3.2) -> void:
 	for p in points:
 		await _drive_to(p, v)
 	await _stop()
+
+
+func reverse_to(p: Vector3, yaw: float, v := 1.3) -> void:
+	## Заднім ходом — рівно в точку p з поворотом yaw (причіп іде рівно за трактором).
+	_job += 1
+	var id := _job
+	state = "drive"
+	plow_down = false
+	var p0 := global_position
+	var y0 := rotation.y
+	var secs := maxf(1.5, Vector2(p.x - p0.x, p.z - p0.z).length() / v)
+	var rig := trailer_rigid
+	trailer_rigid = true
+	var t := 0.0
+	while t < secs and id == _job:
+		var dt := get_process_delta_time()
+		t = minf(secs, t + dt)
+		var k := smoothstep(0.0, 1.0, t / secs)
+		var np := p0.lerp(p, k)
+		np.y = Util.hill_y(np)
+		global_position = np
+		rotation.y = lerp_angle(y0, yaw, k)
+		speed = -v * (0.25 + 0.75 * sin(k * PI))
+		steer = 0.0
+		await get_tree().process_frame
+	speed = 0.0
+	trailer_rigid = rig
+
+
+func hitch_pose_for(eye: Vector3, yaw: float) -> Vector3:
+	## Де має стати трактор (поворот yaw), щоб зчіпка опинилась на петлі дишла eye.
+	var p := eye - Basis(Vector3.UP, yaw) * (hitch_local + Vector3(0, 0, -0.12))
+	p.y = 0.0
+	return p
 
 
 func plow_field() -> void:
@@ -645,6 +721,7 @@ func nika_end() -> void:
 # ------------------------------------------------------------------ причепи: плуг і причіп-самоскид (trailer.gd)
 var plow_on := true                    # плуг на навісці
 var trailer = null                     # причеплений причіп
+var trailer_rigid := false             # заднім ходом причіп іде рівно за трактором
 var hitch_local := Vector3(0, 0.62, -1.6)
 var _plow_parent: Node3D
 var _plow_pos0 := Vector3.ZERO
