@@ -174,7 +174,7 @@ func _build_top() -> void:
 	c.add_child(coins_label)
 	top.add_child(c)
 	var snd := Button.new()
-	snd.text = "♪"
+	snd.text = "✕" if bool(Game.state.get("music_off", false)) else "♪"
 	snd.custom_minimum_size = Vector2(64, 0)
 	snd.add_theme_font_override("font", bold)
 	snd.add_theme_font_size_override("font_size", 28)

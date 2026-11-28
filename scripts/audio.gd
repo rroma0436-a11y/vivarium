@@ -69,7 +69,8 @@ func _ready() -> void:
 		p.bus = "SFX"
 		add_child(p)
 		_ui.append(p)
-	set_muted(bool(Game.state.get("muted", false)))
+	set_muted(false)
+	set_music_off(bool(Game.state.get("music_off", false)))
 
 
 func _stream(id: String) -> AudioStream:
@@ -160,6 +161,16 @@ func set_muted(m: bool) -> void:
 
 func is_muted() -> bool:
 	return AudioServer.is_bus_mute(0)
+
+
+func set_music_off(m: bool) -> void:
+	## Вимикає лише фонову музику; природа, персонажі й інтерфейс звучать далі.
+	Game.state["music_off"] = m
+	AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"), m)
+
+
+func is_music_off() -> bool:
+	return AudioServer.is_bus_mute(AudioServer.get_bus_index("Music"))
 
 
 func _process(delta: float) -> void:

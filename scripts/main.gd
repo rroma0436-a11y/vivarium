@@ -1182,8 +1182,8 @@ func _on_action(name: String) -> void:
 					granny.trip_job(k)
 			_follow_later(granny)
 		"sound":
-			audio.set_muted(not audio.is_muted())
-			hud.buttons["sound"].text = "♪" if not audio.is_muted() else "✕"
+			audio.set_music_off(not audio.is_music_off())
+			hud.buttons["sound"].text = "♪" if not audio.is_music_off() else "✕"
 
 
 # ------------------------------------------------------------------ камера: зосередитись на тому, кого торкнулись, або загальний огляд
