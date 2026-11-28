@@ -249,6 +249,8 @@ func _process(delta: float) -> void:
 
 func _entry() -> Array:
 	## З вулиці біля хвіртки — на під'їзд до головної дороги.
+	if hut.has("entry"):
+		return (hut["entry"] as Array).duplicate()          # хата нового села: далі — ride_way
 	var st: Vector3 = hut["street"]
 	if absf(st.x) > 6.5:
 		return [st, Vector3(signf(st.x) * 6.0, 0, st.z)]

@@ -1,9 +1,10 @@
-extends "res://scripts/npc.gd"
+extends "res://scripts/farmhand.gd"
 ## Тракторист Саня — порається біля трактора під навісом на фермі. Що вміє (меню):
 ## поговорити; зорати пшеничне поле (лише коли пшеницю вже змолочено); забрати пшеницю від комбайна
 ## й висипати в бункер на фермі; завезти пшеницю дідові (від комбайна на дідовому полі — до воріт подвір'я);
 ## набрати зерна з бункера й відвезти в засік біля млина. Увесь час поїздки сидить за кермом,
 ## трактор їде сам (tractor.gd: drive_route, plow_field, reverse_to), причіп — trailer.gd.
+## Живе в новому селі за річкою; на роботу й додому — велосипедом (farmhand.gd).
 
 var tractor
 var trailer
@@ -42,6 +43,11 @@ const LANE_Z := 46.8
 # ------------------------------------------------------------------ кадр
 func _process(delta: float) -> void:
 	_day_step()
+	if _on_bike:
+		super(delta)
+		return
+	if not visible:
+		return                               # удома до ранку
 	if riding:
 		if _bubble_left > 0.0:
 			_bubble_left -= delta
@@ -144,7 +150,7 @@ func _loads(n: int) -> String:
 func command(what: String) -> void:
 	## Із меню тракториста.
 	if doing != "" or riding:
-		say("Я саме за кермом — спершу доїду!", 2.5)
+		say("Я саме за кермом — спершу доїду!" if riding else "Зачекай, я зайнятий!", 2.5)
 		return
 	_talk_t = 0.0
 	match what:
@@ -218,6 +224,9 @@ func wheat_job() -> void:
 	if not _near(cb, main.world.outer.WHEAT_N):
 		say("Комбайна на пшеничному полі нема — нема від кого брати пшеницю!", 3.5)
 		return
+	if cb.get("driver") != null and not cb.ready_unload:
+		say("Комбайн ще молотить — приїду, як змолотить!", 3.0)
+		return
 	var id := begin_job("wheat")
 	say("Поїду заберу пшеницю від комбайна!", 2.5)
 	await _get_in()
@@ -242,6 +251,9 @@ func grandpa_job() -> void:
 	var cb: Node3D = main.combine
 	if not _near(cb, main.world.outer.WHEAT):
 		say("Комбайна на дідовому полі нема — нема від кого брати пшеницю!", 3.5)
+		return
+	if cb.get("driver") != null and not cb.ready_unload:
+		say("Комбайн ще молотить — приїду, як змолотить!", 3.0)
 		return
 	var id := begin_job("grandpa")
 	say("Завезу дідові пшениці!", 2.5)
@@ -359,6 +371,7 @@ func _load_from_combine(cb: Node3D) -> void:
 	f = f.normalized()
 	var t: Vector3 = cb.to_global(Vector3(cb.SPOUT.x, 0, cb.SPOUT.z)) + f * _bed()
 	t.y = 0.0
+	_auger_when_near(cb, t)
 	await tractor.drive_route([t - f * 16.0, t - f * 7.0, t], 2.4)
 	say("Висипай!", 1.5)
 	cb.auger_out(true)
@@ -367,9 +380,18 @@ func _load_from_combine(cb: Node3D) -> void:
 	cb.pour(true)
 	await _fill(8.0)
 	cb.pour(false)
+	cb.unloads += 1
 	cb.auger_out(false)
 	say("Повний причіп!", 2.0)
 	await wait(1.5)
+
+
+func _auger_when_near(cb: Node3D, t: Vector3) -> void:
+	## Щойно трактор із причепом під'їжджає до комбайна — шнек повертається вбік, до причепа.
+	while doing != "" and is_instance_valid(cb) and tractor.global_position.distance_to(t) > 18.0:
+		await get_tree().process_frame
+	if doing != "" and is_instance_valid(cb):
+		cb.auger_out(true)
 
 
 func _load_from_bunker() -> void:

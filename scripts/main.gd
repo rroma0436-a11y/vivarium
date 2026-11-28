@@ -21,6 +21,7 @@ var plane
 var tractor
 var trailer                             # причіп-самоскид до трактора (trailer.gd)
 var sanya                               # тракторист Саня (sanya.gd)
+var vasyl                               # комбайнер Василь (vasyl.gd)
 var orchard
 var forest
 var hit_area: Node
@@ -721,7 +722,9 @@ func _tap_object(kind: String) -> void:
 			audio.play("magic_bells", -6.0)
 			hud.toast("Чарівний соняшник із золотих насінинок", 3.0)
 		"combine":
-			if _ctl_girl and combine:
+			if combine and combine.driver != null:
+				hud.toast("Комбайном зараз кермує комбайнер Василь!", 3.0)
+			elif _ctl_girl and combine:
 				start_mount("combine", combine)
 			else:
 				hud.toast("Комбайн. Керуй Нікою — і вона залізе в кабіну й поїде!", 3.0)
@@ -836,11 +839,11 @@ func _tap_object(kind: String) -> void:
 				hud.show_kid_menu(false)      # будь-яку нову справу можна замовити й під час іншої
 			elif best and best == gvintyk and qid == "eggs" and gvintyk.doing == "":
 				gvintyk.command("eggs")
-			elif best and best == sanya:
+			elif best and (best == sanya or best == vasyl):
 				audio.play_at("question", best, -4.0)
 				if best.doing == "" and not best.moving and best.get("riding") == null:
 					best.face(rig.cam.global_position)
-				hud.show_worker_menu("sanya")
+				hud.show_worker_menu("sanya" if best == sanya else "vasyl")
 			elif best and best in [gvintyk, shepherd, groom]:
 				audio.play_at("robot_beep" if best == gvintyk else "question", best, -4.0)
 				if best.doing == "" and not best.moving and best.get("riding") == null:
@@ -1078,6 +1081,13 @@ func _on_action(name: String) -> void:
 			if sanya:
 				sanya.command({"sn_plow": "plow", "sn_wheat": "wheat", "sn_grandpa": "grandpa", "sn_mill": "mill"}[name])
 				_follow_later(sanya)
+		"vs_talk":
+			if vasyl:
+				vasyl.talk_nika()
+		"vs_wheat", "vs_grandpa":
+			if vasyl:
+				vasyl.command({"vs_wheat": "wheat", "vs_grandpa": "grandpa"}[name])
+				_follow_later(vasyl)
 		"girl_talk":
 			if girl:
 				girl.talk(rig.cam.global_position)
@@ -1473,7 +1483,8 @@ func _spawn_workers() -> void:
 
 # ------------------------------------------------------------------ велосипеди працівників (на роботу й з роботи)
 const WORKER_BIKE := 1.25                       # трохи більші за Ніччин
-const FARM_BIKES := [Vector3(-174.5, 0, 79.5), Vector3(-176.0, 0, 79.5), Vector3(-177.5, 0, 79.5), Vector3(-179.0, 0, 79.5)]   # на фермі біля південних воріт
+const FARM_BIKES := [Vector3(-174.5, 0, 79.5), Vector3(-176.0, 0, 79.5), Vector3(-177.5, 0, 79.5), Vector3(-179.0, 0, 79.5),
+	Vector3(-180.5, 0, 79.5), Vector3(-182.0, 0, 79.5)]   # на фермі біля південних воріт (останні два — Саня й Василь)
 var worker_bikes: Array = []
 
 
@@ -1499,6 +1510,41 @@ func _give_bike(w, sx: float, row: int, k: int, in_farm: Vector3) -> void:
 	var tail: Array = (w.way as Array).slice(at + 1) if at >= 0 else []
 	var walk: Array = [Vector3(-171.5, 0, 77.0), Vector3(-171.5, 0, 34.0)] + tail
 	w.give_bike(b, info, _bike_way(sx, row), park, walk)
+
+
+# нове село (за річкою): тракторист і комбайнер живуть на другій вулиці праворуч від мосту, у перших двох хатах
+const NV_HOMES := {"sanya": "Хата_05", "vasyl": "Хата_04"}
+# від хвіртки — вулицею на північ до розвилки, головним проходом до мосту (для кожної хати — з її місця на вулиці)
+const NV_STREET := {"Хата_05": [Vector3(-32.5, 0, 128.5), Vector3(-25.0, 0, 124.0), Vector3(-14.0, 0, 120.0), Vector3(-6.0, 0, 116.5)],
+	"Хата_04": [Vector3(-46.5, 0, 154.0), Vector3(-43.5, 0, 148.0), Vector3(-40.5, 0, 140.5), Vector3(-37.0, 0, 133.5),
+		Vector3(-32.5, 0, 128.5), Vector3(-25.0, 0, 124.0), Vector3(-14.0, 0, 120.0), Vector3(-6.0, 0, 116.5)]}
+# через місток, понад річкою на захід — і крізь передні (південні) ворота на ферму
+const NV_RIDE := [Vector3(0, 0, 112.0), Vector3(0, 0, 104.0), Vector3(0, 0, 97.5), Vector3(-5.0, 0, 94.8), Vector3(-60.0, 0, 95.0),
+	Vector3(-120.0, 0, 95.0), Vector3(-165.0, 0, 95.0), Vector3(-171.5, 0, 90.5), Vector3(-171.5, 0, 85.0), Vector3(-171.5, 0, 81.0)]
+# від велосипеда на фермі — пішки внутрішньою дорогою й уздовж північного забору до навісу
+const NV_WALK := [Vector3(-171.5, 0, 77.0), Vector3(-171.5, 0, 53.0), Vector3(-171.5, 0, 36.0), Vector3(-162.0, 0, 32.2),
+	Vector3(-150.0, 0, 32.6), Vector3(-145.5, 0, 35.5)]
+
+
+func _give_bike_nv(w, house: String, k: int, walk: Array) -> void:
+	## Велосипед працівникові з нового села: з хати — велосипедом через місток і понад річкою на ферму.
+	var bz = world.outer.bazaar
+	if bz == null or not ResourceLoader.exists("res://assets/models/bicycle.glb") or not bz.has_method("house_info"):
+		return
+	var info: Dictionary = bz.house_info(house)
+	if info.is_empty():
+		return
+	var b := preload("res://scripts/bike.gd").new()
+	b.name = "WorkerBike_%d" % k
+	b.size = WORKER_BIKE
+	b.pickable = false
+	world.yard_root.add_child(b)
+	if not b.setup():
+		b.queue_free()
+		return
+	worker_bikes.append(b)
+	var park := Transform3D(Basis(Vector3.UP, PI), FARM_BIKES[k])
+	w.give_bike(b, info, (NV_STREET[house] as Array) + NV_RIDE, park, walk)
 
 
 func _bike_way(sx: float, row: int) -> Array:
@@ -1629,6 +1675,7 @@ var farm_folk: Array = []
 
 func _spawn_farm_folk() -> void:
 	## Комбайнер Василь порається біля комбайна, тракторист Саня — біля трактора (під навісом на фермі).
+	## Обидва живуть у новому селі за річкою й щодня їздять на ферму велосипедами.
 	var o = world.outer
 	var list := [
 		["vasyl", 1.75, o.COMBINE_POS, [Vector3(-136.0, 0, 36.8), Vector3(-140.6, 0, 38.5), Vector3(-133.0, 0, 37.0)],
@@ -1641,7 +1688,7 @@ func _spawn_farm_folk() -> void:
 	for e in list:
 		if not Models.exists(e[0]):
 			continue
-		var n = preload("res://scripts/sanya.gd").new() if e[0] == "sanya" else preload("res://scripts/npc.gd").new()
+		var n = preload("res://scripts/sanya.gd").new() if e[0] == "sanya" else preload("res://scripts/vasyl.gd").new()
 		n.name = String(e[0]).capitalize()
 		n.main = self
 		world.yard_root.add_child(n)
@@ -1656,10 +1703,20 @@ func _spawn_farm_folk() -> void:
 		n.play("idle")
 		n.face(e[2])
 		farm_folk.append(n)
+		n.tractor = tractor
+		n.trailer = trailer
 		if e[0] == "sanya":
 			sanya = n
-			n.tractor = tractor
-			n.trailer = trailer
+		else:
+			vasyl = n
+			n.combine = combine
+		# живе в новому селі: зранку велосипедом на ферму, увечері — додому
+		var last: Vector3 = spots[1]
+		var walk: Array = NV_WALK + ([Vector3(-143.5, 0, 43.5), Vector3(-138.0, 0, 44.0)] if e[0] == "sanya" else [last])
+		n.start_farm(spots[0], [spots[0]], 6.9 if e[0] == "sanya" else 7.1, 19.1 if e[0] == "sanya" else 19.3)
+		n.bounds = Rect2(-200.0, -75.0, 270.0, 250.0)        # від ферми — до нового села за річкою
+		n._wide = n.bounds
+		_give_bike_nv(n, NV_HOMES[e[0]], 4 if e[0] == "sanya" else 5, walk)
 
 
 func _spawn_farm_extras() -> void:
@@ -2059,7 +2116,10 @@ func _nika_do(what: String) -> void:
 			else:
 				start_mount("horse", hh)
 		"nk_combine":
-			start_mount("combine", combine)
+			if combine and combine.driver != null:
+				hud.toast("Комбайном зараз кермує комбайнер Василь!", 3.0)
+			else:
+				start_mount("combine", combine)
 		"nk_tractor":
 			start_mount("tractor", tractor)
 		"nk_jump":

@@ -321,7 +321,7 @@ func _close_dialog() -> void:
 
 
 func dialog_open() -> bool:
-	for m in [beep_menu, grandpa_menu, kid_menu, girl_menu, tractor_menu, granny_menu, hitch_menu, choice_menu, shepherd_menu, groom_menu, gv_menu, sanya_menu]:
+	for m in [beep_menu, grandpa_menu, kid_menu, girl_menu, tractor_menu, granny_menu, hitch_menu, choice_menu, shepherd_menu, groom_menu, gv_menu, sanya_menu, vasyl_menu]:
 		if m != null and is_instance_valid(m) and m.visible:
 			return true
 	return dialog.visible
@@ -351,6 +351,7 @@ func _build_beep_menu() -> void:
 	groom_menu = _make_menu("Конюше Семене, що робитимемо?", GROOM_ITEMS, Color(0.6, 0.42, 0.25), _worker_items)
 	gv_menu = _make_menu("Гвинтику, що робитимеш з технікою?", GV_ITEMS, Color(0.4, 0.5, 0.6), _worker_items)
 	sanya_menu = _make_menu("Саню, що робитимеш на тракторі?", SANYA_ITEMS, Color(0.8, 0.28, 0.2), _worker_items)
+	vasyl_menu = _make_menu("Василю, що робитимеш на комбайні?", VASYL_ITEMS, Color(0.85, 0.6, 0.15), _worker_items)
 	girl_menu = _make_menu("Ніка", GIRL_ITEMS, Color(0.85, 0.3, 0.4), _girl_items, 2)
 	tractor_menu = _make_menu("Трактор Червоненький", TRACTOR_ITEMS, Color(0.8, 0.28, 0.2), _tr_items)
 	hitch_menu = _make_menu("Причепи трактора", HITCH_ITEMS, Color(0.3, 0.45, 0.7), _th_items)
@@ -494,11 +495,17 @@ const SANYA_ITEMS := [
 	["sn_mill", "Поїхати у млин", Color(0.62, 0.45, 0.28)],
 ]
 var sanya_menu: Control
+const VASYL_ITEMS := [
+	["vs_talk", "Поговорити", Color(0.45, 0.6, 0.75)],
+	["vs_wheat", "Змолотити пшеницю", Color(0.85, 0.65, 0.25)],
+	["vs_grandpa", "Змолотити діду", Color(0.75, 0.5, 0.3)],
+]
+var vasyl_menu: Control
 
 
 func show_worker_menu(who: String) -> void:
-	## Меню працівників ферми: пастух, конюх, Гвинтик, тракторист.
-	_open_menu({"shepherd": shepherd_menu, "groom": groom_menu, "gvintyk": gv_menu, "sanya": sanya_menu}[who])
+	## Меню працівників ферми: пастух, конюх, Гвинтик, тракторист, комбайнер.
+	_open_menu({"shepherd": shepherd_menu, "groom": groom_menu, "gvintyk": gv_menu, "sanya": sanya_menu, "vasyl": vasyl_menu}[who])
 
 var girl_menu: Control
 var _girl_items := {}

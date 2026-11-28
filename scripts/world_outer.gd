@@ -2683,6 +2683,43 @@ func set_wheat_ripe(on: bool) -> void:
 	var f := get_node_or_null("WheatField")
 	if f:
 		f.visible = on
+	if on:
+		# скошене комбайном колосся виростає знову
+		for mm in _wheat_orig:
+			if is_instance_valid(mm):
+				var arr: Array = _wheat_orig[mm]
+				for j in arr.size():
+					(mm as MultiMesh).set_instance_transform(j, arr[j])
+		_wheat_orig.clear()
+
+
+var _wheat_orig := {}                                # MultiMesh → початкові положення кущів колосся (до покосу)
+
+
+func cut_wheat(p: Vector3, half: float) -> void:
+	## Комбайн скошує пшеницю жаткою: кущі колосся в квадраті ±half довкола p зникають.
+	var f := get_node_or_null("WheatField")
+	if f == null or not f.visible:
+		return
+	for c in f.get_children():
+		var mmi := c as MultiMeshInstance3D
+		if mmi == null or mmi.multimesh == null:
+			continue
+		var mm := mmi.multimesh
+		var o := mmi.position
+		var ab := mm.get_aabb()
+		if p.x < o.x + ab.position.x - half or p.x > o.x + ab.end.x + half or p.z < o.z + ab.position.z - half or p.z > o.z + ab.end.z + half:
+			continue
+		if not _wheat_orig.has(mm):
+			var arr: Array = []
+			for j in mm.instance_count:
+				arr.append(mm.get_instance_transform(j))
+			_wheat_orig[mm] = arr
+		var orig: Array = _wheat_orig[mm]
+		for j in mm.instance_count:
+			var q: Vector3 = o + (orig[j] as Transform3D).origin
+			if absf(q.x - p.x) < half and absf(q.z - p.z) < half:
+				mm.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ONE * 0.001), (orig[j] as Transform3D).origin))
 
 
 # ------------------------------------------------------------------ комбайн біля пшеничного поля (Комбайн.blend)

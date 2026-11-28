@@ -192,6 +192,146 @@ func ride_anim(v: float, steer_to: float, dt: float) -> void:
 		(p as Node3D).transform = Transform3D(Basis(Vector3.UP, -_steer * 0.8) * b3.basis, b3.origin)
 
 
+# ------------------------------------------------------------------ комбайнер Василь за кермом (vasyl.gd): комбайн їде сам
+var driver: Node3D = null                           # хто сидить за кермом (Василь)
+var state := "parked"                               # parked / drive / harvest
+var ready_unload := false                           # змолотив і чекає тракториста — можна висипати зерно
+var unloads := 0                                    # скільки разів висипав зерно в причіп
+var cutting := false                                # жатка скошує колосся
+var _job := 0
+var _cut_t := 0.0
+const WHEELBASE := 3.0
+
+
+func start_engine() -> void:
+	state = "drive"
+
+
+func _outer():
+	var m = get_node_or_null("/root/Main")
+	return m.world.outer if m and "world" in m and m.world else null
+
+
+func _drive_to(p: Vector3, v: float, reach := 0.7) -> void:
+	## Їде до точки, як справжня машина: повертає поступово, обминає хати, дерева й людей.
+	var id := _job
+	var t := 0.0
+	while id == _job:
+		var dt := get_process_delta_time()
+		t += dt
+		var to := p - global_position
+		to.y = 0.0
+		var d := to.length()
+		if d < reach or t > 90.0:
+			return
+		var g := Vehicles.steer_target(global_position, p, 2.2) if d > 6.0 else p
+		var tg := g - global_position
+		var want := atan2(tg.x, tg.z)
+		var diff := angle_difference(rotation.y, want)
+		var vv := v * clampf(1.2 - absf(diff) * 0.5, 0.35, 1.0)
+		if d < 2.0:
+			vv = minf(vv, maxf(0.6, d))
+		var sp := move_toward(speed, vv, dt * 1.4)
+		rotation.y += clampf(diff, -1.0, 1.0) * dt * sp / WHEELBASE * 1.8
+		global_position += Vector3(sin(rotation.y), 0, cos(rotation.y)) * sp * dt
+		global_position.y = Util.hill_y(global_position)
+		var ppl := Vehicles.people()
+		if not ppl.is_empty():
+			var gp := global_position
+			var g2 := Obstacles.push_out(gp, 2.2, 0.0, ppl)
+			if g2.distance_to(gp) > 0.001:
+				global_position = Vector3(g2.x, gp.y, g2.z)
+				sp = move_toward(sp, 0.4, dt * 4.0)
+		ride_anim(sp, clampf(diff * 1.6, -0.5, 0.5), dt)
+		_cut_step(dt)
+		await get_tree().process_frame
+
+
+func _cut_step(dt: float) -> void:
+	## Жатка скошує колосся перед собою.
+	if not cutting:
+		return
+	_cut_t += dt
+	if _cut_t < 0.15:
+		return
+	_cut_t = 0.0
+	var o = _outer()
+	if o and o.has_method("cut_wheat"):
+		o.cut_wheat(to_global(Vector3(0, 0, 3.6)), 2.3)
+
+
+func _stop() -> void:
+	while absf(speed) > 0.05:
+		var dt := get_process_delta_time()
+		var sp := move_toward(speed, 0.0, dt * 2.5)
+		global_position += Vector3(sin(rotation.y), 0, cos(rotation.y)) * sp * dt
+		ride_anim(sp, 0.0, dt)
+		await get_tree().process_frame
+	ride_anim(0.0, 0.0, 0.016)
+
+
+func drive_route(points: Array, v := 3.0) -> void:
+	_job += 1
+	state = "drive"
+	for p in points:
+		await _drive_to(p, v)
+	await _stop()
+
+
+func reverse_to(p: Vector3, yaw: float, v := 1.0) -> void:
+	## Заднім ходом — рівно в точку p з поворотом yaw (під навіс).
+	_job += 1
+	var id := _job
+	var p0 := global_position
+	var y0 := rotation.y
+	var secs := maxf(2.0, Vector2(p.x - p0.x, p.z - p0.z).length() / v)
+	var t := 0.0
+	while t < secs and id == _job:
+		var dt := get_process_delta_time()
+		t = minf(secs, t + dt)
+		var k := smoothstep(0.0, 1.0, t / secs)
+		var np := p0.lerp(p, k)
+		np.y = Util.hill_y(np)
+		global_position = np
+		rotation.y = lerp_angle(y0, yaw, k)
+		ride_anim(-v * (0.25 + 0.75 * sin(k * PI)), 0.0, dt)
+		await get_tree().process_frame
+	ride_anim(0.0, 0.0, 0.016)
+
+
+func harvest_field(r: Rect2, cut := true, v := 2.6) -> void:
+	## Молотьба: ряди вздовж z від східного краю до західного (парна кількість — закінчує біля південного краю),
+	## на кінці ряду — розворот; жатка скошує колосся (cut — чи є на полі пшениця).
+	_job += 1
+	var id := _job
+	state = "harvest"
+	cutting = cut
+	var x0 := r.position.x + 2.2
+	var x1 := r.end.x - 2.2
+	var z_s := r.end.y - 3.5
+	var z_n := r.position.y + 3.5
+	var n := int(ceil((x1 - x0) / 4.4)) + 1
+	if n % 2 == 1:
+		n += 1
+	var step := (x1 - x0) / float(n - 1)
+	for k in n:
+		var x := x1 - step * k
+		var north := k % 2 == 0
+		var a := Vector3(x, 0, z_s if north else z_n)
+		var b := Vector3(x, 0, z_n if north else z_s)
+		await _drive_to(a, v * 0.7, 0.6)
+		if id != _job:
+			break
+		await _drive_to(b, v, 0.6)
+		if id != _job:
+			break
+		if k < n - 1:
+			await _drive_to(Vector3(x - step * 0.5, 0, b.z + (-2.4 if north else 2.4)), v * 0.6, 0.8)
+	cutting = false
+	state = "drive"
+	await _stop()
+
+
 func _process(delta: float) -> void:
 	if auger and absf(_auger_k - _auger_want) > 0.001:
 		_auger_k = move_toward(_auger_k, _auger_want, delta * 0.45)

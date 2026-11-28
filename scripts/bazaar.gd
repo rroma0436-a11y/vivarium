@@ -1447,6 +1447,41 @@ func hut_info(p: Vector3) -> Dictionary:
 	return best if bd < 8.0 else {}
 
 
+func house_info(nm: String) -> Dictionary:
+	## Точки хати базару (нового села) для працівника ферми — так само, як village_info у старому селі:
+	## усередині → за дверима → перед хвірткою (у дворі) → за хвірткою → вулиця; де стоїть велосипед.
+	var hs: Node = root.get_node_or_null("bz_houses") if root else null
+	var house: Node3D = (hs.get_node_or_null(nm) as Node3D) if hs else null
+	if house == null:
+		return {}
+	var door := house.get_node_or_null(nm + "_Двері") as MeshInstance3D
+	var gate := house.get_node_or_null(nm + "_Калітка") as MeshInstance3D
+	var wn := house.get_node_or_null(nm + "_Стіни") as MeshInstance3D
+	if door == null or gate == null or wn == null:
+		return {}
+	var flat := func(v: Vector3) -> Vector3: return Vector3(v.x, 0, v.z)
+	# перед хати — бік стін, де двері
+	var wb := wn.get_aabb()
+	var wc_h: Vector3 = wn.transform * wb.get_center()
+	var dc_h: Vector3 = door.transform * door.get_aabb().get_center()
+	var rel := (dc_h - wc_h) / (wb.size * 0.5)
+	var fl := Vector3(signf(rel.x), 0, 0) if absf(rel.x) > absf(rel.z) else Vector3(0, 0, signf(rel.z))
+	var front: Vector3 = flat.call(house.global_transform.basis * fl).normalized()
+	var hc: Vector3 = flat.call(wn.global_transform * wb.get_center())
+	var dc: Vector3 = flat.call(door.global_transform * door.get_aabb().get_center())
+	var gc: Vector3 = flat.call(gate.global_transform * gate.get_aabb().get_center())
+	var e := {"pos": house.global_position, "door": door, "gate": gate, "door_at": dc,
+		"inside": dc - front * 0.9, "door_out": dc + front * 1.0,
+		"gate_at": gc, "gate_in": gc - front * 1.1, "gate_out": gc + front * 1.1, "street": gc + front * 1.8}
+	e["entry"] = [e["street"]]
+	# велосипед — за тином обабіч хвіртки (з боку своєї хати), уздовж тину
+	var along := Vector3(-front.z, 0, front.x)
+	if along.dot(hc - gc) < 0.0:
+		along = -along
+	e["bike"] = Transform3D(Basis(Vector3.UP, atan2(along.x, along.z)), gc + front * 0.8 + along * 2.3)
+	return e
+
+
 func npc_door(n: Node, open: bool, from := Vector3.INF) -> void:
 	## Працівник ферми сам відчиняє (і тримає) або зачиняє двері чи хвіртку.
 	if n == null:

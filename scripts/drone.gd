@@ -26,7 +26,7 @@ var fires: Array = []
 var _next_fire := 40.0
 var _wp := Vector3.ZERO
 var charger: Node3D
-var charger_pos := Vector3(-139.5, 0, 40.0)
+var charger_pos := Vector3(-131.2, 0, 34.8)        # збоку від навісу (на північ), не перед комбайном
 var _charger_mat: StandardMaterial3D
 
 
@@ -322,7 +322,7 @@ func _take_off() -> void:
 
 # ------------------------------------------------------------------ зарядка біля комбайна
 func _make_charger() -> void:
-	## Зарядна станція за 2 м від борту комбайна.
+	## Зарядна станція — за навісом з північного боку, біля задньої частини комбайна (не перед ним: там він виїжджає).
 	var main = get_node_or_null("/root/Main")
 	var c: Node3D = main.combine if main and "combine" in main and main.combine else null
 	var par := get_parent() as Node3D
@@ -336,7 +336,7 @@ func _make_charger() -> void:
 			box = bb if first else box.merge(bb)
 			first = false
 		if not first:
-			charger_pos = Vector3(box.position.x - 2.0 - 0.55, 0.0, box.get_center().z)
+			charger_pos = Vector3(box.end.x - 1.2, 0.0, box.position.z - 3.0)
 	charger = Node3D.new()
 	charger.name = "DroneCharger"
 	charger.position = charger_pos
