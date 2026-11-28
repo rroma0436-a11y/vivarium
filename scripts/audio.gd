@@ -26,6 +26,8 @@ var _next_wood := 15.0
 var _next_fnight := 12.0
 # погода: час від часу дощ, інколи з грозою (блискавка й грім)
 var raining := false
+var rain_k := 0.0        # 0..1: наскільки захмарило (плавно росте з дощем, повільно спадає)
+var wet := 0.0           # 0..1: наскільки земля мокра (від цього проявляються калюжі)
 var storm := false
 var _rain_left := 0.0
 var _next_rain := randf_range(240.0, 480.0)
@@ -238,23 +240,23 @@ func _nature(delta: float, n: float, indoor: bool, muffle: float) -> void:
 func _make_weather_fx() -> void:
 	_rain_fx = CPUParticles3D.new()
 	_rain_fx.name = "Rain"
-	_rain_fx.amount = 700
-	_rain_fx.lifetime = 1.1
+	_rain_fx.amount = 1700
+	_rain_fx.lifetime = 0.95
 	_rain_fx.emitting = false
 	_rain_fx.local_coords = false
 	_rain_fx.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_rain_fx.emission_box_extents = Vector3(14.0, 0.5, 14.0)
+	_rain_fx.emission_box_extents = Vector3(16.0, 0.5, 16.0)
 	_rain_fx.direction = Vector3(0.08, -1.0, 0.0)
 	_rain_fx.spread = 2.0
-	_rain_fx.initial_velocity_min = 14.0
-	_rain_fx.initial_velocity_max = 17.0
+	_rain_fx.initial_velocity_min = 17.0
+	_rain_fx.initial_velocity_max = 21.0
 	_rain_fx.gravity = Vector3(0, -9.8, 0)
 	var q := QuadMesh.new()
-	q.size = Vector2(0.02, 0.45)
+	q.size = Vector2(0.026, 0.7)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(0.75, 0.82, 0.95, 0.45)
+	m.albedo_color = Color(0.78, 0.85, 0.97, 0.6)
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	q.material = m
@@ -291,6 +293,9 @@ func _weather(delta: float, indoor: bool, muffle: float) -> void:
 				start_rain(randf() < 0.35)
 			else:
 				_next_rain = randf_range(200.0, 500.0)
+	# хмари збираються за кілька секунд, розходяться повільно; земля мокріє ~хвилину, сохне ~3 хвилини
+	rain_k = move_toward(rain_k, 1.0 if raining else 0.0, delta * (0.12 if raining else 0.03))
+	wet = clampf(wet + delta * (1.0 / 60.0 if raining else -1.0 / 200.0), 0.0, 1.0)
 	_fade(_amb_rain, (-2.0 if raining else -80.0) + (muffle * 0.6 if indoor else 0.0), delta * 0.5)
 	if _rain_fx:
 		var show := raining and not indoor

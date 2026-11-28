@@ -47,6 +47,7 @@ func _ready() -> void:
 	_make_ground()
 	_make_horizon()
 	_make_yard()
+	_make_puddles()
 	_make_room()
 	_make_portal()
 	_make_fireflies()
@@ -71,6 +72,7 @@ uniform vec3 sun_dir = vec3(0.0, 0.5, -0.85);
 uniform vec3 moon_dir = vec3(0.0, 0.6, 0.8);
 uniform float moon_phase = 3.14159;
 uniform float sky_time = 0.0;
+uniform float overcast = 0.0;
 
 float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
@@ -173,6 +175,14 @@ void sky() {
 			}
 		}
 	}
+	// дощ: небо затягує сірими хмарами, що повільно пливуть
+	if (overcast > 0.001) {
+		float cu = d.x / max(d.y + 0.35, 0.2);
+		float cv = d.z / max(d.y + 0.35, 0.2);
+		float cf = fbm(vec2(cu, cv) * 1.4 + vec2(sky_time * 0.012, 0.0));
+		vec3 grey = mix(vec3(0.34, 0.37, 0.42), vec3(0.62, 0.65, 0.7), cf) * (1.0 - night * 0.85);
+		c = mix(c, grey, overcast * 0.95 * smoothstep(-0.02, 0.12, d.y));
+	}
 	// картинки неба підготовлені під filmic і exposure 0.76 — у грі вони виглядають як оригінал
 	COLOR = c * tint * 1.53;
 }
@@ -253,11 +263,23 @@ func update_time(_force := false) -> void:
 	var amb_night := Color(0.22, 0.27, 0.45)
 	env.ambient_light_color = amb_day.lerp(amb_night, n)
 	env.ambient_light_energy = lerpf(0.5, 0.55, n) * (lerpf(0.55, 1.0, _portal_k) if indoor else 1.0)
+	var au = get_node_or_null("/root/Main/Audio")
+	var rk: float = float(au.rain_k) if au else 0.0
+	var wetk: float = float(au.wet) if au else 0.0
+	sun.light_energy *= 1.0 - 0.7 * rk
+	sun.shadow_opacity = 1.0 - 0.75 * rk
+	env.ambient_light_color = env.ambient_light_color.lerp(Color(0.6, 0.63, 0.7) * (1.0 - n * 0.6), rk * 0.6)
+	env.fog_density = lerpf(0.0028, 0.0055, rk)
+	sky_mat.set_shader_parameter("overcast", rk)
+	if puddle_mat:
+		puddle_mat.set_shader_parameter("wet", wetk)
+		puddle_mat.set_shader_parameter("rain", rk if (au and au.raining) else 0.0)
+		puddle_mat.set_shader_parameter("sky_col", Vector3(0.5 + 0.2 * (1.0 - rk), 0.55 + 0.15 * (1.0 - rk), 0.65) * (1.0 - n * 0.8))
 	var dusk := clampf(1.0 - abs(n - 0.5) * 2.0, 0.0, 1.0)     # найбільше на межі дня й ночі
 	var tint := Color(0.86, 0.86, 0.88).lerp(Color(0.95, 0.78, 0.72), dusk * 0.8)
 	sky_mat.set_shader_parameter("night", n)
 	sky_mat.set_shader_parameter("tint", Vector3(tint.r, tint.g, tint.b))
-	env.fog_light_color = Color(0.62, 0.6, 0.76).lerp(Color(0.2, 0.18, 0.4), n).lerp(Color(0.8, 0.62, 0.68), dusk * 0.4)    # бузковий серпанок, як обрій неба
+	env.fog_light_color = Color(0.62, 0.6, 0.76).lerp(Color(0.2, 0.18, 0.4), n).lerp(Color(0.8, 0.62, 0.68), dusk * 0.4).lerp(Color(0.52, 0.55, 0.6) * (1.0 - n * 0.7), rk * 0.8)    # бузковий серпанок, як обрій неба
 	# вогники: вікна хати, кімнати, світлячки
 	for l in window_lights:
 		(l as OmniLight3D).light_energy = 1.4 * smoothstep(0.3, 0.8, n)
@@ -421,6 +443,85 @@ func _grass_mesh() -> ArrayMesh:
 		st.add_vertex(off + lean + Vector3(0, hgt, 0))
 	st.generate_normals()
 	return st.commit()
+
+
+var puddle_mat: ShaderMaterial
+
+
+func _make_puddles() -> void:
+	## Калюжі: пласкі плями з відблиском неба, проявляються, коли земля змокла; під дощем по них ідуть кола.
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled;
+uniform float wet = 0.0;
+uniform float rain = 0.0;
+uniform vec3 sky_col = vec3(0.6, 0.65, 0.72);
+varying vec3 wpos;
+float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+void fragment() {
+	float k = smoothstep(0.12, 0.85, wet);
+	float d = length(UV - 0.5) * 2.0;
+	d += (vn(wpos.xz * 2.3) - 0.5) * 0.55 + (vn(wpos.xz * 6.0) - 0.5) * 0.12;
+	float edge = mix(0.05, 0.9, k);
+	float a = smoothstep(edge, edge - 0.16, d);
+	if (a < 0.01) { discard; }
+	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.0);
+	vec3 deep = vec3(0.16, 0.15, 0.14);
+	vec3 col = mix(deep, sky_col, 0.22 + 0.6 * fres);
+	col *= mix(0.75, 1.0, smoothstep(edge - 0.3, edge - 0.05, d) * -1.0 + 1.0);
+	// кола від крапель
+	vec2 g = wpos.xz * 3.2;
+	vec2 cell = floor(g);
+	float tt = fract(TIME * 0.8 + h2(cell));
+	vec2 ctr = cell + 0.5 + (vec2(h2(cell + 3.1), h2(cell + 7.7)) - 0.5) * 0.6;
+	float ring = smoothstep(0.05, 0.0, abs(length(g - ctr) - tt * 0.5)) * (1.0 - tt);
+	col += vec3(0.5) * ring * rain;
+	ALBEDO = col;
+	ALPHA = a * 0.85 * k;
+}
+"""
+	puddle_mat = ShaderMaterial.new()
+	puddle_mat.shader = sh
+	puddle_mat.render_priority = 1
+	var q := QuadMesh.new()
+	q.size = Vector2(2, 2)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var placed: Array = []
+	var tries := 0
+	while placed.size() < 16 and tries < 600:
+		tries += 1
+		var p := Vector3(rng.randf_range(-24, 14), 0.03, rng.randf_range(-17, 8))
+		if _in_building(p) or _in_house(p):
+			continue
+		if p.x > 10.5 and p.x < 18.5 and p.z > -10.2 and p.z < 1.2:
+			continue     # грядки
+		if Vector2(p.x + 6.4, p.z + 7.3).length() < 1.8:
+			continue     # ряднина під деревом
+		var far := true
+		for o in placed:
+			if Vector2(p.x - o.x, p.z - o.z).length() < 3.5:
+				far = false
+		if not far:
+			continue
+		placed.append(p)
+		var mi := MeshInstance3D.new()
+		mi.mesh = q
+		mi.material_override = puddle_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var sc := rng.randf_range(0.55, 1.25)
+		mi.position = p
+		mi.rotation = Vector3(-PI / 2.0, rng.randf() * TAU, 0)
+		mi.scale = Vector3(sc * rng.randf_range(1.0, 1.5), sc, 1.0)
+		yard_root.add_child(mi)
 
 
 func _make_grass() -> void:
