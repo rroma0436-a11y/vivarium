@@ -1055,14 +1055,13 @@ func _on_action(name: String) -> void:
 		"gm_talk":
 			if groom:
 				groom.talk_nika()
-		"gv_repair", "gv_test", "gv_eggs":
+		"gv_inspect", "gv_fix_tractor", "gv_fix_combine", "gv_test":
 			if gvintyk:
-				gvintyk.command({"gv_repair": "repair", "gv_test": "test", "gv_eggs": "eggs"}[name])
+				gvintyk.command({"gv_inspect": "inspect", "gv_fix_tractor": "repair_tractor", "gv_fix_combine": "repair_combine", "gv_test": "test"}[name])
 				_follow_later(gvintyk)
 		"gv_talk":
 			if gvintyk:
-				gvintyk.talk(rig.cam.global_position)
-				audio.play_at("robot_beep", gvintyk, -4.0)
+				gvintyk.talk_nika()
 		"girl_talk":
 			if girl:
 				girl.talk(rig.cam.global_position)
