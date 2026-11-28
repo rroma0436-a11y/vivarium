@@ -222,6 +222,14 @@ func give_bike(b: Node3D, info: Dictionary, route: Array, park: Transform3D, wal
 	bike_farm = park
 	farm_walk = walk
 	bike.global_transform = park if on_duty else (info["bike"] as Transform3D)
+	if not on_duty and Game.hour() >= 12.0:
+		_hut_light(true)
+
+
+func _hut_light(on: bool) -> void:
+	var bz = main.world.outer.bazaar if main and main.world and main.world.outer else null
+	if bz and hut.has("door") and hut["door"]:
+		bz.house_light(hut["door"], on)
 
 
 func _process(delta: float) -> void:
@@ -296,6 +304,7 @@ func _through(n: Node, at: Vector3, beyond: Vector3) -> void:
 func _out_of_hut() -> void:
 	## Зранку виходить із хати крізь двері, двором до хвіртки, відчиняє її, виходить і зачиняє.
 	position = hut["inside"]
+	_hut_light(false)
 	var to: Vector3 = (hut["door_out"] as Vector3) - (hut["inside"] as Vector3)
 	rotation.y = atan2(to.x, to.z)
 	_near_hut = true
@@ -314,6 +323,7 @@ func _into_hut() -> void:
 	await _through(hut["gate"], hut["gate_at"], hut["gate_in"])
 	await go(hut["door_out"], false, false)
 	await _through(hut["door"], hut["door_at"], hut["inside"])
+	_hut_light(true)                       # зайшов у хату — світиться у вікнах
 	_show(false)
 	_near_hut = false
 

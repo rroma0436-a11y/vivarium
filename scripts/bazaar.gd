@@ -781,6 +781,7 @@ func step(delta: float, who: Array, cam: Vector3, me := Vector3.INF) -> void:
 	_acc += delta
 	if _acc > 0.2:
 		_acc = 0.0
+		_lights_tick()
 		var who2: Array = who.duplicate()
 		for s in sellers:
 			if is_away(s):
@@ -848,6 +849,60 @@ func _seller_life(s: Dictionary, delta: float) -> void:
 				s["left"] = 3.0
 
 
+# ------------------------------------------------------------------ світло у вікнах: увечері зайшли в хату — світиться, пізніше по черзі лягають спати
+var _lit := {}                   # вузол хати → година, коли там гасять світло
+var _glow_mat: StandardMaterial3D
+
+
+func _house_of(n: Node) -> Node3D:
+	## Вузол хати (дитина bz_houses), до якої належить n.
+	var hs: Node = root.get_node_or_null("bz_houses") if root else null
+	while n and n.get_parent() != hs:
+		n = n.get_parent()
+	return n as Node3D
+
+
+func house_light(house, on: bool) -> void:
+	if not (house is Node3D):
+		return
+	var hn := _house_of(house as Node)
+	if hn == null:
+		return
+	if on == _lit.has(hn):
+		return
+	if on:
+		_lit[hn] = randf_range(21.2, 23.9)
+	else:
+		_lit.erase(hn)
+	if _glow_mat == null:
+		_glow_mat = StandardMaterial3D.new()
+		_glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_glow_mat.albedo_color = Color(1.0, 0.8, 0.45)
+	for c in hn.get_children():
+		if not (c is MeshInstance3D) or not String(c.name).ends_with("Вікна"):
+			continue
+		var mi := c as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			var m := mi.mesh.surface_get_material(i)
+			if m and (m.resource_name.contains("Скло") or m.resource_name.contains("Фіранка")):
+				mi.set_surface_override_material(i, _glow_mat if on else null)
+
+
+func _lights_tick() -> void:
+	## Кожна хата гасить світло у свою годину (не всі разом).
+	if _lit.is_empty():
+		return
+	var h := Game.hour()
+	for hn in _lit.keys():
+		if h < 12.0 or h >= float(_lit[hn]) or not is_instance_valid(hn):
+			if is_instance_valid(hn):
+				house_light(hn, false)
+			else:
+				_lit.erase(hn)
+
+
 # ------------------------------------------------------------------ розпорядок продавців: зранку на базар, увечері додому
 ## Хата продавця — позаду його ларька: перший ларьок від церкви → перша хата від церкви і т. д.
 ## Ідуть стежкою до калітки, заходять у двір, у хату; удома сидять за столом або лежать на ліжку. Зранку — назад.
@@ -898,6 +953,7 @@ func _setup_routes() -> void:
 		if r.is_empty():
 			continue
 		sd["route"] = r
+		sd["house"] = list[idx]
 		sd["stall_p"] = sp
 		sd["yaw0"] = hn.rotation.y
 		sd["st"] = ""
@@ -1045,6 +1101,8 @@ func _sit_down(s: Dictionary) -> void:
 
 
 func _go(s: Dictionary, path: Array, goal: String) -> void:
+	if goal == "work":
+		house_light(s.get("house"), false)
 	s["path"] = path
 	s["pi"] = 0
 	s["goal"] = goal
@@ -1087,6 +1145,8 @@ func _routine(s: Dictionary, delta: float) -> void:
 				_at_stall(s)
 			else:
 				_lie_down(s)
+				if h >= 12.0:
+					house_light(s.get("house"), true)
 		"stall":
 			if not work:
 				_go(s, _home_path(s), "home")
@@ -1095,6 +1155,8 @@ func _routine(s: Dictionary, delta: float) -> void:
 				_stand_up(s)
 				return
 			s["sit_left"] = float(s["sit_left"]) - delta
+			if not _lit.has(s.get("house")):
+				s["sit_left"] = 0.0          # світло згасло — пора спати
 			if s["sit_left"] <= 0.0:
 				_stand_up(s, [R["bed_side"]], "bed")
 		"lie":
@@ -1161,6 +1223,8 @@ func _walk_step(s: Dictionary, delta: float) -> void:
 	if fd <= stp + 0.02:
 		hn.position = tgt
 		s["pi"] = i + 1
+		if String(s["goal"]) == "home" and i == ((s["route"] as Dictionary)["pts"] as Array).size() - 1:
+			house_light(s.get("house"), true)            # зайшов у хату — вмикає світло
 	else:
 		hn.position = p + d * (stp / fd)
 		hn.rotation.y = lerp_angle(hn.rotation.y, atan2(d.x, d.z), 1.0 - exp(-delta * 8.0))
