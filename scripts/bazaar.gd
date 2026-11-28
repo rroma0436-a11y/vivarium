@@ -133,6 +133,7 @@ func build() -> void:
 		if not sellers.is_empty():
 			var sd: Dictionary = sellers[sellers.size() - 1]
 			sd["shop"] = s[3]
+			sd["voice"] = "bz_" + String(s[3])
 			var at: Vector2 = s[1]
 			sd["front"] = to_world(at.x, at.y + (-1.75 if at.y > -3.0 else 1.75))     # де стати покупцеві (у проході)
 			sd["greet_t"] = 0.0
@@ -240,6 +241,15 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 	var fp: Vector2 = SELLER_FILE_POS[file]
 	m.position = Vector3(-fp.x, 0, fp.y)
 	holder.position = Vector3(at.x, 0, -at.y)
+	for c in m.get_children():
+		if c is Node3D:
+			# модель у файлі розвернута (лицем назад) — поворот переносимо на holder, щоб хода й руки лягали правильно
+			var fz: Vector3 = (c as Node3D).basis.z
+			var yaw := atan2(fz.x, fz.z)
+			if absf(yaw) > 0.1:
+				(c as Node3D).basis = Basis(Vector3.UP, -yaw) * (c as Node3D).basis
+				holder.rotation.y = yaw
+			break
 	var ap := Models.anim_player(m)
 	var idle := ""
 	if ap and ap.has_animation("Idle"):
@@ -252,7 +262,8 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 		ap.play(an)
 		ap.seek(randf() * ap.get_animation(an).length, true)
 		idle = an
-	Models.give_nika_anims(ap)
+	var anims := {}
+	Models.give_nika_anims(ap, anims)
 	for mi in m.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var pos := to_world(at.x, at.y)
@@ -282,7 +293,8 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 	walls.add_child(cyl)
 	cyl.global_position = pos + Vector3(0, 0.8, 0)
 	sellers.append({"node": holder, "ap": ap, "model": m, "pos": pos, "label": lb, "left": 0.0, "words": words,
-		"rich": ap != null and ap.has_animation("Give"), "next": randf_range(4.0, 8.0), "idle": idle, "h": 1.7})
+		"rich": ap != null and ap.has_animation("Give"), "next": randf_range(4.0, 8.0), "idle": idle, "h": 1.7,
+		"talk": String(anims.get("talk", ""))})
 
 
 func _add_folk(id: String, parent: Node3D, at: Vector3, yaw: float, height: float, words: String) -> Dictionary:

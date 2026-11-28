@@ -1614,10 +1614,10 @@ func _spawn_farm_folk() -> void:
 	## Комбайнер Василь порається біля комбайна, тракторист Саня — біля трактора (під навісом на фермі).
 	var o = world.outer
 	var list := [
-		["vasyl", 1.75, o.COMBINE_POS, [Vector3(-127.8, 0, 38.0), Vector3(-128.2, 0, 41.5), Vector3(-130.0, 0, 35.0)],
+		["vasyl", 1.75, o.COMBINE_POS, [Vector3(-136.0, 0, 36.8), Vector3(-140.6, 0, 38.5), Vector3(-133.0, 0, 37.0)],
 			["Я — Василь, комбайнер. Мій комбайн — найкращий у районі!", "Жнива скоро — треба все підкрутити й змастити.",
 			 "Не підходь близько до жатки — там ножі гострі!", "Як зерно визріє — поїдемо косити пшеницю."]],
-		["sanya", 1.72, o.SHED, [Vector3(-127.8, 0, 45.0), Vector3(-127.5, 0, 48.5), Vector3(-128.5, 0, 52.5)],
+		["sanya", 1.72, o.SHED, [Vector3(-136.2, 0, 46.2), Vector3(-134.5, 0, 48.0), Vector3(-138.0, 0, 44.0)],
 			["Привіт! Я Саня, тракторист.", "Трактор у мене — звір! Зараз масло поміняю.",
 			 "Завтра поле орати — треба плуг перевірити.", "Без трактора на фермі — як без рук!"]],
 	]
@@ -1632,7 +1632,7 @@ func _spawn_farm_folk() -> void:
 		n.position = spots[0]
 		n.setup(e[0], e[1], {"walk": ["walking"], "run": ["running"], "talk": ["talk"]}, ["walk", "run"], e[4], spots, "npc")
 		Models.give_nika_anims(n.ap, n.anims)
-		n.bounds = Rect2(o.SHED_ROOF.position - Vector2(8, 8), o.SHED_ROOF.size + Vector2(16, 16))
+		n.bounds = Rect2(o.SHED_ROOF.position.x - 4.0, o.SHED_ROOF.position.y - 3.0, o.SHED_ROOF.end.x - o.SHED_ROOF.position.x + 3.8, o.SHED_ROOF.size.y + 6.0)   # під навісом, усередині забору ферми
 		n.extra_obs = Obstacles.outer
 		n.make_idle_from("walk")
 		n.setup_pose()
