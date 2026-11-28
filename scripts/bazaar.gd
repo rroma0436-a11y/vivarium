@@ -44,14 +44,28 @@ const PRIEST_LINES := ["Мир вам! Заходь, дитино, тут зав
 	"У неділю приходь на службу з дідусем і бабусею!", "Бережи рідних і допомагай їм — то найкраща молитва."]
 # товар кожного продавця: [назва, ціна, що це (Util.thing)]
 const GOODS := {
-	"sausage": [["Ковбаса домашня", 10, "sausage"], ["Сало", 8, "salo"], ["Шинка", 12, "ham"]],
-	"tools": [["Сокира", 15, "axe"], ["Молоток", 8, "hammer"], ["Граблі", 10, "rake"], ["Лопата", 10, "shovel"], ["Вила", 10, "fork"]],
-	"sweets": [["Льодяник", 2, "candy"], ["Пряник", 3, "gingerbread"], ["Цукерки", 4, "sweets"]],
-	"bread": [["Паляниця", 4, "bread"], ["Батон", 3, "baton"], ["Булочка", 2, "bun"]],
-	"fruit": [["Яблука", 3, "apple"], ["Груші", 3, "pear"], ["Сливи", 2, "plum"]],
+	"sausage": [["Ковбаса домашня", 10, "sausage"], ["Кільце ковбаси", 12, "sausage"], ["Сосиски", 6, "sausage"], ["Сало", 8, "salo"], ["Шинка", 12, "ham"]],
+	"tools": [["Сокира", 15, "axe"], ["Молоток", 8, "hammer"], ["Граблі", 10, "rake"], ["Лопата", 10, "shovel"], ["Вила", 10, "fork"], ["Сапа", 9, "hoe"]],
+	"sweets": [["Льодяник", 2, "candy"], ["Пряник", 3, "gingerbread"], ["Цукерки", 4, "sweets"], ["Печиво", 3, "gingerbread"], ["Бублик", 2, "bun"], ["Рогалик", 3, "bun"]],
+	"bread": [["Хлібина", 5, "bread"], ["Паляниця", 6, "bread"], ["Батон", 4, "baton"], ["Булочка", 2, "bun"]],
+	"fruit": [["Яблука червоні", 3, "apple"], ["Яблука зелені", 3, "apple"], ["Груші", 3, "pear"], ["Сливи", 2, "plum"]],
 	"herbs": [["Ромашка", 2, "chamomile"], ["М'ята", 2, "mint"], ["Чебрець", 3, "thyme"]],
 	"fish": [["Короп", 12, "carp"], ["Щука", 15, "pike"], ["Тараня", 6, "taranya"]],
 	"honey": [["Банка меду", 10, "honey"], ["Медові соти", 8, "honeycomb"]],
+}
+# хто торгує в ларьку (ім'я в діалозі)
+const SELLER_NAMES := {"sausage": "Продавець ковбас", "tools": "Продавець інструментів", "sweets": "Продавчиня солодощів",
+	"bread": "Пекар", "fruit": "Продавчиня фруктів", "herbs": "Вєрка", "fish": "Вакула", "honey": "Тимофій"}
+# «Поговорити»: [що каже герой, що відповідає продавець]
+const SELLER_TALK := {
+	"sausage": [["Добрий день! А ковбаска своя?", "Своя, домашня! Сам коптив на вишневих трісках."], ["Як торгівля сьогодні?", "Добре, Ніко! Люди сальце розбирають швидше, ніж я нарізаю."]],
+	"tools": [["Добрий день! А сокири гострі?", "Як бритва! Тільки обережно — це не іграшка."], ["А що найбільше купують?", "Граблі й лопати — весна ж, усі на городах."]],
+	"sweets": [["Добрий день! А пряники свіжі?", "Сьогодні вранці пекла! З медом і корицею."], ["Які цукерки найсмачніші?", "Льодяники-півники! Діти їх найбільше люблять."]],
+	"bread": [["Добрий день! Як смачно пахне!", "Хліб тільки з печі, ще теплий! Хлібина — 5 грн."], ["Ви рано встаєте?", "До світанку! Поки тісто підійде, поки піч натоплю…"]],
+	"fruit": [["Добрий день! Яблучка свої?", "Із нашого саду! Солоденькі, соковиті."], ["А груші вже стиглі?", "Стиглі-престиглі! Бери, не пошкодуєш."]],
+	"herbs": [["Добрий день, Вєрко! Від чого ромашка?", "Від застуди й від смутку, дитино. Заваришся — і на душі тепло."], ["Де ви збираєте трави?", "На луках за річкою, поки роса не зійшла."]],
+	"fish": [["Добрий день, Вакуло! Сьогодні добре ловилося?", "Ще й як! Коропа такого витяг — ледь удержав!"], ["А щука кусається?", "Ого, ще й як! Зуби в неї гострі, мов голки."]],
+	"honey": [["Добрий день, Тимофію! Мед свій?", "Зі своєї пасіки! Липовий і гречаний."], ["Бджоли не кусаються?", "Як їх не дратувати — то й не кусаються. Бджілка — трудівниця!"]],
 }
 const SHOP_ASK := {
 	"sausage": "Добрий день, Ніко! Ковбаски, сальця чи шинки?",
@@ -137,6 +151,7 @@ func build() -> void:
 	_setup_buildings()
 	_collect_roads()
 	_add_sheds()
+	_setup_routes()
 
 
 func _add_sheds() -> void:
@@ -221,25 +236,29 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 	root.add_child(holder)
 	var m: Node3D = load(DIR % file).instantiate()
 	holder.add_child(m)
-	# файл уже стоїть на своєму місці з Blender — зсуваємо, якщо цей продавець в іншому ларьку
+	# файл уже стоїть на своєму місці з Blender — зсуваємо модель так, щоб ноги були в початку holder (тоді продавець може ходити)
 	var fp: Vector2 = SELLER_FILE_POS[file]
-	holder.position = Vector3(at.x - fp.x, 0, -(at.y - fp.y))
+	m.position = Vector3(-fp.x, 0, fp.y)
+	holder.position = Vector3(at.x, 0, -at.y)
 	var ap := Models.anim_player(m)
+	var idle := ""
 	if ap and ap.has_animation("Idle"):
 		ap.get_animation("Idle").loop_mode = Animation.LOOP_LINEAR
 		ap.play("Idle")
+		idle = "Idle"
 	elif ap and ap.get_animation_list().size() > 0:
 		var an: String = ap.get_animation_list()[0]
 		ap.get_animation(an).loop_mode = Animation.LOOP_LINEAR
 		ap.play(an)
 		ap.seek(randf() * ap.get_animation(an).length, true)
+		idle = an
 	Models.give_nika_anims(ap)
 	for mi in m.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var pos := to_world(at.x, at.y)
 	var pick := Util.pick_area("bz_seller", Vector3(0.9, 1.8, 0.9), Vector3(0, 0.9, 0))
 	pick.set_meta("words", words)
-	var here := Vector3(fp.x, 0, -fp.y)          # де стоїть продавець у системі holder
+	var here := Vector3.ZERO                     # де стоїть продавець у системі holder
 	pick.position = here
 	holder.add_child(pick)
 	var lb := Label3D.new()
@@ -263,7 +282,7 @@ func _add_seller(file: String, at: Vector2, words: String) -> void:
 	walls.add_child(cyl)
 	cyl.global_position = pos + Vector3(0, 0.8, 0)
 	sellers.append({"node": holder, "ap": ap, "model": m, "pos": pos, "label": lb, "left": 0.0, "words": words,
-		"rich": ap != null and ap.has_animation("Give"), "next": randf_range(4.0, 8.0)})
+		"rich": ap != null and ap.has_animation("Give"), "next": randf_range(4.0, 8.0), "idle": idle, "h": 1.7})
 
 
 func _add_folk(id: String, parent: Node3D, at: Vector3, yaw: float, height: float, words: String) -> Dictionary:
@@ -310,7 +329,7 @@ func _add_folk(id: String, parent: Node3D, at: Vector3, yaw: float, height: floa
 	walls.add_child(cyl)
 	cyl.global_position = holder.global_position + Vector3(0, 0.8, 0)
 	var sd := {"node": holder, "ap": ap, "model": m, "pos": holder.global_position, "label": lb, "left": 0.0, "words": words,
-		"rich": false, "next": 0.0, "idle": idle, "talk": String(anims.get("talk", "")), "voice": id}
+		"rich": false, "next": 0.0, "idle": idle, "talk": String(anims.get("talk", "")), "voice": id, "h": height}
 	sellers.append(sd)
 	return sd
 
@@ -587,7 +606,7 @@ func seller_of(n: Node) -> Dictionary:
 func seller_near(p: Vector3, r: float) -> Dictionary:
 	## Продавець, біля чийого ларька (у проході) стоїть Ніка.
 	for sd in sellers:
-		if sd.has("front") and Vector2((sd["front"] as Vector3).x - p.x, (sd["front"] as Vector3).z - p.z).length() < r:
+		if sd.has("front") and not is_away(sd) and Vector2((sd["front"] as Vector3).x - p.x, (sd["front"] as Vector3).z - p.z).length() < r:
 			return sd
 	return {}
 
@@ -762,10 +781,14 @@ func step(delta: float, who: Array, cam: Vector3, me := Vector3.INF) -> void:
 	_acc += delta
 	if _acc > 0.2:
 		_acc = 0.0
+		var who2: Array = who.duplicate()
+		for s in sellers:
+			if is_away(s):
+				who2.append((s["node"] as Node3D).global_position)      # продавець іде додому чи на базар — відчиняє двері, калітку
 		for d in doors:
 			var p: Vector3 = d["pos"]
 			var near := false
-			for q in who:
+			for q in who2:
 				var v: Vector3 = q
 				if absf(v.x - p.x) < 2.2 and absf(v.z - p.z) < 2.2:
 					near = true
@@ -794,7 +817,11 @@ func step(delta: float, who: Array, cam: Vector3, me := Vector3.INF) -> void:
 		var r := Basis(d["axis"], deg_to_rad(95.0) * float(d["sign"]) * e)
 		(d["node"] as Node3D).transform = Transform3D(r * tr.basis, tr.origin)
 	for s in sellers:
-		if s["rich"] and (s["model"] as Node3D).visible:
+		if s.has("route"):
+			_routine(s, delta)
+		if is_away(s) or float(s.get("talk_t", 0.0)) > 0.0:
+			pass
+		elif s["rich"] and (s["model"] as Node3D).visible:
 			_seller_life(s, delta)
 		elif String(s.get("idle", "")) != "" and s["ap"] and not (s["ap"] as AnimationPlayer).is_playing():
 			(s["ap"] as AnimationPlayer).play(s["idle"], 0.3)
@@ -819,6 +846,356 @@ func _seller_life(s: Dictionary, delta: float) -> void:
 				lb.text = STUDENT_LINES[randi() % STUDENT_LINES.size()]
 				lb.visible = true
 				s["left"] = 3.0
+
+
+# ------------------------------------------------------------------ розпорядок продавців: зранку на базар, увечері додому
+## Хата продавця — позаду його ларька: перший ларьок від церкви → перша хата від церкви і т. д.
+## Ідуть стежкою до калітки, заходять у двір, у хату; удома сидять за столом або лежать на ліжку. Зранку — назад.
+const WORK_FROM := 7.0
+const WORK_TO := 19.0
+const WALK_SPEED := 1.25
+
+
+static func is_away(sd: Dictionary) -> bool:
+	## Продавець не за прилавком (іде або вдома).
+	return sd.has("route") and not (String(sd.get("st", "")) in ["", "stall"])
+
+
+func _setup_routes() -> void:
+	var st: Node = root.get_node_or_null("bz_stalls")
+	var hs: Node = root.get_node_or_null("bz_houses")
+	if st == null or hs == null:
+		return
+	var row_a: Array = []        # хати «Хата_…» позаду ряду ларьків ближче до них
+	var row_b: Array = []        # хати «Хата_Зелена_…» позаду другого ряду
+	for h in hs.get_children():
+		var nm := String(h.name)
+		if not (h is Node3D) or not nm.begins_with("Хата"):
+			continue
+		var p: Vector3 = (h as Node3D).position
+		if nm.begins_with("Хата_Зелена"):
+			if p.z > 15.0 and p.z < 45.0:
+				row_b.append(h)
+		elif p.z < -15.0 and p.z > -45.0:
+			row_a.append(h)
+	var by_x := func(a, b) -> bool: return (a as Node3D).position.x < (b as Node3D).position.x
+	row_a.sort_custom(by_x)
+	row_b.sort_custom(by_x)
+	var k := 0
+	for sd in sellers:
+		if not sd.has("shop"):
+			continue
+		var hn: Node3D = sd["node"]
+		var sp := hn.position
+		var list: Array = row_a if sp.z < 3.16 else row_b
+		var idx := int(round((sp.x - 5.0) / 4.5))          # ларьки від церкви: x = 5, 9.5, 14, 18.5, 23
+		if idx < 0 or idx >= list.size():
+			continue
+		var stall := _stall_near(st, sp)
+		if stall == null:
+			continue
+		var r := _home_route(stall, list[idx] as Node3D, float(sd.get("h", 1.7)))
+		if r.is_empty():
+			continue
+		sd["route"] = r
+		sd["stall_p"] = sp
+		sd["yaw0"] = hn.rotation.y
+		sd["st"] = ""
+		sd["off"] = k * 0.12
+		var ap: AnimationPlayer = sd["ap"]
+		sd["walk"] = Models.find_anim(ap, ["walking", "walk"])
+		sd["sit_anim"] = Models.find_anim(ap, ["stand_to_sit"])
+		sd["stand_anim"] = Models.find_anim(ap, ["sit_to_stand"])
+		if ap and String(sd["walk"]) != "":
+			Models.set_loop(ap, [sd["walk"]])
+		if ap and String(sd["sit_anim"]) != "":
+			ap.get_animation(sd["sit_anim"]).loop_mode = Animation.LOOP_NONE
+		k += 1
+
+
+func _stall_near(st: Node, p: Vector3) -> Node3D:
+	var best: Node3D = null
+	var bd := 3.0
+	for n in st.get_children():
+		var nm := String(n.name)
+		if not (n is MeshInstance3D) or not nm.begins_with("Ларьок") or nm.contains("_Двері") or nm.contains("Табурет"):
+			continue
+		var q: Vector3 = (n as Node3D).position
+		var d := Vector2(q.x - p.x, q.z - p.z).length()
+		if d < bd:
+			bd = d
+			best = n
+	return best
+
+
+func _rl(n: Node3D, p: Vector3) -> Vector3:
+	## Точка в системі вузла n → система root (де стоять продавці).
+	return root.to_local(n.global_transform * p)
+
+
+func _home_route(stall: Node3D, house: Node3D, height: float) -> Dictionary:
+	var nm := String(house.name)
+	var door := house.get_node_or_null(nm + "_Двері") as MeshInstance3D
+	var gate := house.get_node_or_null(nm + "_Калітка") as MeshInstance3D
+	var wn := house.get_node_or_null(nm + "_Стіни") as MeshInstance3D
+	var bed := house.get_node_or_null(nm + "_Ліжко") as MeshInstance3D
+	var chair := house.get_node_or_null(nm + "_Стілець_3") as MeshInstance3D
+	var table := house.get_node_or_null(nm + "_Стіл") as MeshInstance3D
+	var sdoor := stall.get_parent().get_node_or_null(String(stall.name) + "_Двері") as MeshInstance3D
+	if door == null or gate == null or wn == null or bed == null or sdoor == null:
+		return {}
+	var rb := root.global_transform.basis.inverse()
+	var flat := func(v: Vector3) -> Vector3: return Vector3(v.x, 0, v.z)
+	# перед хати — бік стін, де двері
+	var wb := wn.get_aabb()
+	var wc_h: Vector3 = wn.transform * wb.get_center()
+	var dc_h: Vector3 = door.transform * door.get_aabb().get_center()
+	var rel := (dc_h - wc_h) / (wb.size * 0.5)
+	var fl := Vector3(signf(rel.x), 0, 0) if absf(rel.x) > absf(rel.z) else Vector3(0, 0, signf(rel.z))
+	var front: Vector3 = flat.call(rb * (house.global_transform.basis * fl)).normalized()
+	var fy: float = _rl(wn, wb.position).y                          # підлога в хаті
+	var hc: Vector3 = flat.call(_rl(wn, wb.get_center()))
+	var dc: Vector3 = flat.call(_rl(door, door.get_aabb().get_center()))
+	var gc: Vector3 = flat.call(_rl(gate, gate.get_aabb().get_center()))
+	var sdc: Vector3 = flat.call(_rl(sdoor, sdoor.get_aabb().get_center()))
+	var scen: Vector3 = flat.call(_rl(stall, stall.get_aabb().get_center()))
+	var sout := Vector3(0, 0, signf(sdc.z - scen.z) if absf(sdc.z - scen.z) > 0.01 else 1.0)
+	var up := Vector3(0, fy, 0)
+	var gout: Vector3 = gc + front * 2.0
+	var pts: Array = [
+		sdc - sout * 0.55,                 # у ларьку біля дверей
+		sdc + sout * 1.3,                  # вийшов із ларька
+		Vector3(sdc.x, 0, gout.z),         # на вулиці
+		gout,                              # перед калиткою
+		gc - front * 1.2,                  # у дворі
+		dc + front * 3.0,                  # перед ганком
+		dc + front * 0.6 + up,             # на ганку біля дверей
+		dc - front * 0.9 + up,             # у хаті
+	]
+	# ліжко: довга вісь, голова — біля стіни (дальший від середини хати кінець)
+	var bb := bed.get_aabb()
+	var along := Vector3(0, 0, 1) if bb.size.z >= bb.size.x else Vector3(1, 0, 0)
+	var half_l := bb.size.dot(along) * 0.5
+	var half_w := (bb.size.x if along.z > 0.5 else bb.size.z) * 0.5
+	var bc: Vector3 = flat.call(_rl(bed, bb.get_center()))
+	var e1: Vector3 = flat.call(_rl(bed, bb.get_center() + along * half_l))
+	var e2: Vector3 = flat.call(_rl(bed, bb.get_center() - along * half_l))
+	var head: Vector3 = (e1 - e2) if e1.distance_to(hc) > e2.distance_to(hc) else (e2 - e1)
+	head = head.normalized()
+	var side := Vector3(-head.z, 0, head.x)
+	if side.dot(hc - bc) < 0.0:
+		side = -side
+	var top: float = _rl(bed, Vector3(0, bb.position.y + 0.56, 0)).y
+	var r := {"pts": pts, "fy": fy,
+		"bed_side": bc + side * (half_w + 0.45) + up,
+		"bed_root": bc - head * minf(height * 0.5, half_l - 0.02) + Vector3(0, top + 0.1, 0),
+		"bed_yaw": atan2(-head.x, -head.z)}
+	if chair and table:
+		var cc: Vector3 = flat.call(_rl(chair, chair.get_aabb().get_center()))
+		var tc: Vector3 = flat.call(_rl(table, table.get_aabb().get_center()))
+		var face: Vector3 = (tc - cc).normalized()
+		r["sit_at"] = cc + face * 0.3 + up
+		r["sit_yaw"] = atan2(face.x, face.z)
+	return r
+
+
+func _play(s: Dictionary, anim: String, blend := 0.25, speed := 1.0) -> void:
+	var ap: AnimationPlayer = s["ap"]
+	if ap == null or anim == "" or not ap.has_animation(anim):
+		return
+	ap.speed_scale = speed
+	ap.play(anim, blend)
+
+
+func _upright(s: Dictionary, at: Vector3, yaw: float) -> void:
+	var hn: Node3D = s["node"]
+	hn.rotation = Vector3(0, yaw, 0)
+	hn.position = at
+	if s["ap"]:
+		(s["ap"] as AnimationPlayer).speed_scale = 1.0
+
+
+func _at_stall(s: Dictionary) -> void:
+	_upright(s, s["stall_p"], float(s["yaw0"]))
+	s["st"] = "stall"
+	s["pos"] = (s["node"] as Node3D).global_position
+	_play(s, String(s.get("idle", "")), 0.3)
+
+
+func _lie_down(s: Dictionary) -> void:
+	var R: Dictionary = s["route"]
+	var hn: Node3D = s["node"]
+	hn.position = R["bed_root"]
+	hn.rotation = Vector3(-PI / 2.0, float(R["bed_yaw"]), 0)
+	s["st"] = "lie"
+	s["pos"] = hn.global_position
+	_play(s, String(s.get("idle", "")), 0.3, 0.3)       # лежить тихо, ледь дихає
+
+
+func _sit_down(s: Dictionary) -> void:
+	var R: Dictionary = s["route"]
+	_upright(s, R["sit_at"], float(R["sit_yaw"]))
+	s["st"] = "sit"
+	s["sit_left"] = randf_range(40.0, 90.0)
+	s["pos"] = (s["node"] as Node3D).global_position
+	if String(s.get("sit_anim", "")) != "":
+		_play(s, s["sit_anim"], 0.3)
+	else:
+		_play(s, String(s.get("idle", "")), 0.3)
+
+
+func _go(s: Dictionary, path: Array, goal: String) -> void:
+	s["path"] = path
+	s["pi"] = 0
+	s["goal"] = goal
+	s["st"] = "walk"
+	_play(s, String(s.get("walk", "")), 0.3)
+
+
+func _home_path(s: Dictionary) -> Array:
+	## Від ларька до хати; удома — за стіл (якщо сяде) або до ліжка.
+	var R: Dictionary = s["route"]
+	var p: Array = (R["pts"] as Array).duplicate()
+	if R.has("sit_at") and randf() < 0.5:
+		p.append(R["sit_at"])
+		s["after"] = "sit"
+	else:
+		p.append(R["bed_side"])
+		s["after"] = "lie"
+	return p
+
+
+func _work_path(s: Dictionary) -> Array:
+	var p: Array = ((s["route"] as Dictionary)["pts"] as Array).duplicate()
+	p.reverse()
+	p.append(s["stall_p"])
+	return p
+
+
+func _routine(s: Dictionary, delta: float) -> void:
+	var h := Game.hour()
+	var off: float = s["off"]
+	var work := h >= WORK_FROM + off and h < WORK_TO + off
+	if float(s.get("talk_t", 0.0)) > 0.0:
+		s["talk_t"] = float(s["talk_t"]) - delta
+		return
+	var R: Dictionary = s["route"]
+	match String(s["st"]):
+		"":
+			# старт гри: одразу на своєму місці
+			if work:
+				_at_stall(s)
+			else:
+				_lie_down(s)
+		"stall":
+			if not work:
+				_go(s, _home_path(s), "home")
+		"sit":
+			if work:
+				_stand_up(s)
+				return
+			s["sit_left"] = float(s["sit_left"]) - delta
+			if s["sit_left"] <= 0.0:
+				_stand_up(s, [R["bed_side"]], "bed")
+		"lie":
+			if work:
+				_upright(s, R["bed_side"], float(R["bed_yaw"]) + PI)
+				_go(s, _work_path(s), "work")
+		"stand":
+			s["stand_t"] = float(s["stand_t"]) - delta
+			if s["stand_t"] <= 0.0:
+				_go(s, s["next_path"], s["next_goal"])
+		"walk":
+			var goal: String = s["goal"]
+			if goal == "bed" and work:
+				_go(s, _work_path(s), "work")
+				return
+			if (goal == "work" and not work) or (goal == "home" and work):
+				# передумав посеред дороги (час перескочив) — назад тим самим шляхом
+				var back: Array = (s["path"] as Array).slice(0, int(s["pi"]))
+				back.reverse()
+				if goal == "work":
+					back.append(R["bed_side"])
+					s["after"] = "lie"
+					_go(s, back, "home")
+				else:
+					back.append(s["stall_p"])
+					_go(s, back, "work")
+				return
+			_walk_step(s, delta)
+
+
+func _stand_up(s: Dictionary, path: Array = [], goal := "work") -> void:
+	## Встає з-за столу й іде.
+	s["st"] = "stand"
+	s["stand_t"] = 1.2
+	s["next_path"] = path if not path.is_empty() else _work_path(s)
+	s["next_goal"] = goal
+	if goal == "bed":
+		s["after"] = "lie"
+	if String(s.get("stand_anim", "")) != "":
+		_play(s, s["stand_anim"], 0.2)
+	else:
+		s["stand_t"] = 0.0
+
+
+func _walk_step(s: Dictionary, delta: float) -> void:
+	var hn: Node3D = s["node"]
+	var path: Array = s["path"]
+	var i: int = s["pi"]
+	if i >= path.size():
+		match String(s["goal"]):
+			"work":
+				_at_stall(s)
+			_:
+				if String(s.get("after", "lie")) == "sit":
+					_sit_down(s)
+				else:
+					_lie_down(s)
+		return
+	var tgt: Vector3 = path[i]
+	var p := hn.position
+	var d := tgt - p
+	var fd := Vector2(d.x, d.z).length()
+	var stp := WALK_SPEED * delta
+	if fd <= stp + 0.02:
+		hn.position = tgt
+		s["pi"] = i + 1
+	else:
+		hn.position = p + d * (stp / fd)
+		hn.rotation.y = lerp_angle(hn.rotation.y, atan2(d.x, d.z), 1.0 - exp(-delta * 8.0))
+	s["pos"] = hn.global_position
+
+
+func seller_face(sd: Dictionary, p: Vector3) -> void:
+	## Продавець обертається лицем до героя й зупиняється поговорити.
+	if sd.is_empty():
+		return
+	var hn: Node3D = sd["node"]
+	sd["talk_t"] = 30.0
+	var st := String(sd.get("st", "stall"))
+	if st == "walk":
+		_play(sd, String(sd.get("idle", "")), 0.25)
+	if st in ["lie", "sit", "stand"]:
+		return
+	var l := root.to_local(p) - hn.position
+	if Vector2(l.x, l.z).length() < 0.05:
+		return
+	var to := hn.rotation.y + wrapf(atan2(l.x, l.z) - hn.rotation.y, -PI, PI)
+	create_tween().tween_property(hn, "rotation:y", to, 0.35).set_trans(Tween.TRANS_SINE)
+
+
+func seller_talk_end(sd: Dictionary) -> void:
+	if sd.is_empty():
+		return
+	sd["talk_t"] = 0.0
+	var hn: Node3D = sd["node"]
+	var st := String(sd.get("st", "stall"))
+	if st == "walk":
+		_play(sd, String(sd.get("walk", "")), 0.3)
+	elif st in ["stall", ""] and sd.has("yaw0"):
+		var to := hn.rotation.y + wrapf(float(sd["yaw0"]) - hn.rotation.y, -PI, PI)
+		create_tween().tween_property(hn, "rotation:y", to, 0.5).set_trans(Tween.TRANS_SINE)
 
 
 func building_at(p: Vector3):

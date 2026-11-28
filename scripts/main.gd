@@ -787,7 +787,7 @@ func _tap_object(kind: String) -> void:
 		"bz_seller", "bz_shop":
 			if world.outer.bazaar and hit_node:
 				var sd := _seller_dict(hit_node, hit_area)
-				if _ctl_girl and not sd.is_empty() and girl.global_position.distance_to(sd["front"]) < 2.5:
+				if _ctl_girl and not sd.is_empty() and girl.global_position.distance_to((sd["node"] as Node3D).global_position if world.outer.bazaar.is_away(sd) else sd["front"]) < 2.5:
 					_shop_open(sd)
 				elif not sd.is_empty():
 					world.outer.bazaar.seller_say(sd["node"])
@@ -4175,6 +4175,9 @@ func _meet_begin(kind: String, node: Node3D, area: Area3D) -> bool:
 			return false
 		target = sd["front"]
 		r = 0.35
+		if world.outer.bazaar.is_away(sd):
+			target = (sd["node"] as Node3D).global_position        # продавець не в ларьку — іде до нього самого
+			r = 1.0
 	else:
 		if kind in NOT_CHARACTERS or node == null or not is_instance_valid(node) or node == girl:
 			return false
@@ -4630,20 +4633,48 @@ func _shop_open(sd: Dictionary) -> void:
 		return
 	_shop = sd
 	sd["greet_t"] = Time.get_ticks_msec() / 1000.0
+	if bz.is_away(sd):
+		_seller_talk(sd)                # продавець удома чи в дорозі — лише поговорити
+		return
 	_girl_face(sd["pos"])
 	var cat: String = sd["shop"]
 	bz.seller_say(sd["node"], String(bz.SHOP_ASK.get(cat, "Що бажаєш?")))
 	audio.play("question", -8.0, 1.1)
-	var items: Array = []
+	var items: Array = [["sh_talk", "Поговорити", Color(0.3, 0.6, 0.75)]]
 	var goods: Array = bz.GOODS.get(cat, [])
 	var cols := [Color(0.85, 0.5, 0.2), Color(0.7, 0.4, 0.3), Color(0.55, 0.6, 0.3), Color(0.4, 0.55, 0.75), Color(0.6, 0.45, 0.7)]
 	for i in goods.size():
-		items.append(["sh_%d" % i, "%s — %d мон." % [goods[i][0], goods[i][1]], cols[i % cols.size()]])
+		items.append(["sh_%d" % i, "%s — %d грн" % [goods[i][0], goods[i][1]], cols[i % cols.size()]])
 	if cat == "tools" and bz.tack_holder != null and not bz.tack_sold:
-		items.append(["sh_tack", "Сідло й вуздечка — %d мон." % TACK_PRICE, Color(0.55, 0.4, 0.25)])
-	var title: String = {"sausage": "Ковбаси й сало", "tools": "Інструменти", "sweets": "Солодощі", "bread": "Хліб", "fruit": "Фрукти",
-		"herbs": "Трави", "fish": "Риба", "honey": "Мед"}.get(cat, "Ларьок")
-	hud.show_choice("%s — у тебе %d мон." % [title, int(Game.state["coins"])], items, Color(0.85, 0.55, 0.2))
+		items.append(["sh_tack", "Сідло й вуздечка — %d грн" % TACK_PRICE, Color(0.55, 0.4, 0.25)])
+	var title: String = bz.SELLER_NAMES.get(cat, "Ларьок")
+	hud.show_choice("%s — у тебе %d грн" % [title, int(Game.state["coins"])], items, Color(0.85, 0.55, 0.2))
+
+
+func _seller_talk(sd: Dictionary) -> void:
+	## «Поговорити»: продавець обертається лицем до героя, і вони розмовляють.
+	var bz = world.outer.bazaar
+	if bz == null or sd.is_empty() or not sd.has("shop"):
+		return
+	var cat: String = sd["shop"]
+	var who: String = bz.SELLER_NAMES.get(cat, "Продавець")
+	var pair: Array
+	match String(sd.get("st", "stall")):
+		"lie":
+			pair = ["Добрий вечір!", "Ой, я вже відпочиваю… Приходь завтра зранку на базар!"]
+		"sit", "stand":
+			pair = ["Добрий вечір! Смачного!", "Дякую, дитино! Ларьок уже зачинено — приходь завтра зранку."]
+		"walk":
+			pair = ["Добрий день! Куди йдете?", "На базар, торгувати! Заходь потім до ларька." if String(sd.get("goal", "")) == "work" else "Додому, відпочивати! Ларьок до ранку зачинено."]
+		_:
+			var ls: Array = bz.SELLER_TALK.get(cat, [])
+			pair = ls[randi() % ls.size()] if not ls.is_empty() else ["Добрий день!", "Добрий день, дитино!"]
+	bz.seller_face(sd, girl.global_position)
+	_girl_face((sd["node"] as Node3D).global_position)
+	audio.play("question", -8.0, 1.1)
+	hud.show_dialog("Ніка", String(pair[0]), _portrait("Ніка"))
+	hud.show_dialog(who, String(pair[1]), null, func(): bz.seller_talk_end(sd), false)
+	bz.seller_say(sd["node"], String(pair[1]))
 
 
 const GOODS_COLOR := {"sausage": Color(0.55, 0.18, 0.12), "salo": Color(0.96, 0.88, 0.82), "ham": Color(0.82, 0.45, 0.42),
@@ -4660,6 +4691,9 @@ func _shop_buy(id: String) -> void:
 	if id == "sh_tack":
 		_buy_tack()
 		return
+	if id == "sh_talk":
+		_seller_talk(sd)
+		return
 	var i := int(id.trim_prefix("sh_"))
 	var goods: Array = bz.GOODS.get(String(sd["shop"]), [])
 	if i < 0 or i >= goods.size():
@@ -4671,8 +4705,8 @@ func _shop_buy(id: String) -> void:
 		hud.toast("Підійди ближче до ларька", 2.5)
 		return
 	if int(Game.state["coins"]) < price:
-		girl.say("Ой, у мене лише %d монет…" % int(Game.state["coins"]), 2.2)
-		bz.seller_say(sd["node"], "Приходь, як назбираєш %d монет!" % price)
+		girl.say("Ой, у мене лише %d грн…" % int(Game.state["coins"]), 2.2)
+		bz.seller_say(sd["node"], "Приходь, як назбираєш %d грн!" % price)
 		return
 	Game.add_coins(-price)
 	audio.play("coins", -8.0)

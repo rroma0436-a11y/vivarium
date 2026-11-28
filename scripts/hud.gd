@@ -282,9 +282,9 @@ func _build_dialog() -> void:
 	v.add_child(dialog_ok)
 
 
-func show_dialog(who: String, text: String, portrait: Texture2D = null, then := Callable()) -> void:
+func show_dialog(who: String, text: String, portrait: Texture2D = null, then := Callable(), face := true) -> void:
 	if dialog.visible:
-		_dialog_queue.append([who, text, portrait, then])
+		_dialog_queue.append([who, text, portrait, then, face])
 		return
 	if who == "Ніка":
 		var m = get_tree().current_scene
@@ -299,7 +299,7 @@ func show_dialog(who: String, text: String, portrait: Texture2D = null, then := 
 	dialog_name.text = who
 	dialog_text.text = text
 	dialog_scroll.scroll_vertical = 0
-	dialog_portrait.texture = portrait if portrait != null else load("res://assets/ui/grandpa.png")
+	dialog_portrait.texture = portrait if portrait != null else (load("res://assets/ui/grandpa.png") if face else null)
 	dialog_portrait.visible = dialog_portrait.texture != null
 	_on_dialog_close = then
 	dialog.visible = true
@@ -315,7 +315,7 @@ func _close_dialog() -> void:
 		cb.call()
 	if not _dialog_queue.is_empty():
 		var d: Array = _dialog_queue.pop_front()
-		show_dialog(d[0], d[1], d[2], d[3])
+		show_dialog(d[0], d[1], d[2], d[3], d[4] if d.size() > 4 else true)
 
 
 func dialog_open() -> bool:
